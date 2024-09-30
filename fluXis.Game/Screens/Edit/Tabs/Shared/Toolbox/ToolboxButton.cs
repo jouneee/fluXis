@@ -22,7 +22,7 @@ public partial class ToolboxButton : Container, IHasTooltip
     [Resolved]
     protected ChartingContainer ChartingContainer { get; private set; }
 
-    public BlueprintContainer BlueprintContainer => ChartingContainer.BlueprintContainer;
+    public ChartingBlueprintContainer BlueprintContainer => ChartingContainer.BlueprintContainer;
 
     public ChartingTool Tool { get; init; }
     public virtual LocalisableString TooltipText => Tool.Description;
@@ -36,14 +36,14 @@ public partial class ToolboxButton : Container, IHasTooltip
 
     private Container content;
     private Box hover;
-    private Box flash;
+    protected Box Flash { get; private set; }
     private Drawable icon;
 
     [BackgroundDependencyLoader]
     private void load()
     {
         RelativeSizeAxes = Axes.X;
-        Height = 64;
+        Height = 48;
 
         Children = new Drawable[]
         {
@@ -66,7 +66,7 @@ public partial class ToolboxButton : Container, IHasTooltip
                         RelativeSizeAxes = Axes.Both,
                         Alpha = 0
                     },
-                    flash = new Box
+                    Flash = new Box
                     {
                         RelativeSizeAxes = Axes.Both,
                         Alpha = 0
@@ -75,15 +75,15 @@ public partial class ToolboxButton : Container, IHasTooltip
                     {
                         RelativeSizeAxes = Axes.Both,
                         Direction = FillDirection.Horizontal,
-                        Spacing = new Vector2(16, 0),
-                        Padding = new MarginPadding(16),
+                        Spacing = new Vector2(12, 0),
+                        Padding = new MarginPadding(12),
                         Children = new Drawable[]
                         {
                             new Container
                             {
                                 Anchor = Anchor.CentreLeft,
                                 Origin = Anchor.CentreLeft,
-                                Size = new Vector2(32),
+                                Size = new Vector2(24),
                                 Child = icon = CreateIcon() ?? new SpriteIcon
                                 {
                                     RelativeSizeAxes = Axes.Both,
@@ -97,7 +97,7 @@ public partial class ToolboxButton : Container, IHasTooltip
                                 Anchor = Anchor.CentreLeft,
                                 Origin = Anchor.CentreLeft,
                                 Text = Text,
-                                FontSize = 28
+                                WebFontSize = 14
                             }
                         }
                     }
@@ -134,13 +134,13 @@ public partial class ToolboxButton : Container, IHasTooltip
 
     protected override bool OnMouseDown(MouseDownEvent e)
     {
-        content.ScaleTo(.9f, 4000, Easing.OutQuint);
+        content.ScaleTo(.9f, 1000, Easing.OutQuint);
         return base.OnMouseDown(e);
     }
 
     protected override void OnMouseUp(MouseUpEvent e)
     {
-        content.ScaleTo(1, 1000, Easing.OutElastic);
+        content.ScaleTo(1, 100, Easing.OutElastic);
         base.OnMouseUp(e);
     }
 
@@ -159,7 +159,7 @@ public partial class ToolboxButton : Container, IHasTooltip
 
     protected override bool OnClick(ClickEvent e)
     {
-        flash.FadeOutFromOne(400);
+        Flash.FadeOutFromOne(1000, Easing.OutQuint);
 
         if (PlayClickSound)
             samples.Click();

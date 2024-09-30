@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using fluXis.Game.Audio;
-using fluXis.Game.Audio.Transforms;
 using fluXis.Game.Configuration;
 using fluXis.Game.Database.Maps;
 using fluXis.Game.Database.Score;
 using fluXis.Game.Graphics.Background;
+using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Graphics.UserInterface.Context;
@@ -27,18 +28,24 @@ using fluXis.Game.Screens.Gameplay.Replays;
 using fluXis.Game.Screens.Select.Footer;
 using fluXis.Game.Screens.Select.Info;
 using fluXis.Game.Screens.Select.List;
+using fluXis.Game.Screens.Select.List.Items;
 using fluXis.Game.Screens.Select.Mods;
 using fluXis.Game.Screens.Select.Search;
 using fluXis.Game.Screens.Select.UI;
+using fluXis.Game.Storyboards;
+using fluXis.Game.Storyboards.Drawables;
+using fluXis.Game.UI;
 using fluXis.Game.Utils;
 using fluXis.Game.Utils.Extensions;
 using fluXis.Shared.Replays;
 using osu.Framework.Allocation;
 using osu.Framework.Audio.Sample;
 using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Colour;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Input;
 using osu.Framework.Input.Bindings;
@@ -82,12 +89,27 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
 
     private DependencyContainer dependencies;
 
-    protected List<RealmMapSet> Maps { get; } = new();
+    protected List<IListItem> Items { get; } = new();
     protected MapList MapList { get; private set; }
     protected SearchFilters Filters { get; private set; }
 
+    private IListItem currentItem => Items.FirstOrDefault(i => i.State.Value == SelectedState.Selected);
+
+    public MapUtils.SortingMode SortMode => sortMode.Value;
+    public bool SortInverse => sortInverse.Value;
+
+    private Bindable<MapUtils.GroupingMode> groupMode;
+    private Bindable<MapUtils.SortingMode> sortMode;
+    private Bindable<bool> sortInverse;
+
+    private BackgroundVideo video;
+    private Container storyboardContainer;
+
+    private CancellationTokenSource storyboardCancellationToken;
+
     private SelectMapInfo selectMapInfo;
     private SearchBar searchBar;
+    private SearchFilterControls filterControl;
     private SelectFooter footer;
     private ModSelector modSelector;
 
@@ -96,45 +118,76 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
     private Sample rewindClick;
 
     private SelectNoMaps noMapsContainer;
-    private LoadingIcon loadingIcon;
     private SelectLetter letterContainer;
+    private LoadingIcon loadingIcon;
 
-    private readonly List<RealmMapSet> randomHistory = new();
-
-    private readonly Dictionary<RealmMapSet, MapListEntry> lookup = new();
+    private readonly List<IListItem> randomHistory = new();
 
     private Bindable<bool> songSelectBlur;
+    private Bindable<bool> backgroundVideo;
 
     private InputManager inputManager;
+
+    private IdleTracker searchTracker;
 
     [BackgroundDependencyLoader]
     private void load(ISampleStore samples, FluXisConfig config)
     {
-        menuScroll = samples.Get("UI/scroll.mp3");
-        randomClick = samples.Get("UI/Select/Random.wav");
-        rewindClick = samples.Get("UI/Select/Rewind.wav");
+        menuScroll = samples.Get("UI/scroll");
+        randomClick = samples.Get("UI/Select/random");
+        rewindClick = samples.Get("UI/Select/rewind");
 
         songSelectBlur = config.GetBindable<bool>(FluXisSetting.SongSelectBlur);
+        backgroundVideo = config.GetBindable<bool>(FluXisSetting.BackgroundVideo);
+
+        groupMode = config.GetBindable<MapUtils.GroupingMode>(FluXisSetting.GroupingMode);
+        sortMode = config.GetBindable<MapUtils.SortingMode>(FluXisSetting.SortingMode);
+        sortInverse = config.GetBindable<bool>(FluXisSetting.SortingInverse);
 
         dependencies.CacheAs(this);
         dependencies.CacheAs(Filters = new SearchFilters());
         dependencies.CacheAs(modSelector = new ModSelector());
 
-        Filters.OnChange += UpdateSearch;
-
         InternalChildren = new Drawable[]
         {
+            searchTracker = new IdleTracker(400, UpdateSearch),
             new Container
             {
                 RelativeSizeAxes = Axes.Both,
                 Padding = new MarginPadding { Top = -10 },
-                Child = new Box
+                Children = new Drawable[]
                 {
-                    RelativeSizeAxes = Axes.Both,
-                    Colour = ColourInfo.GradientVertical(Colour4.Black.Opacity(.8f), Colour4.Black.Opacity(0))
+                    new BufferedContainer
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        BlurSigma = new Vector2(12),
+                        RedrawOnScale = false,
+                        Children = new Drawable[]
+                        {
+                            video = new BackgroundVideo
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                FillMode = FillMode.Fill,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                VideoClock = clock,
+                                ShowDim = false
+                            },
+                            storyboardContainer = new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                AlwaysPresent = true
+                            }
+                        }
+                    },
+                    new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = ColourInfo.GradientVertical(Colour4.Black.Opacity(.8f), Colour4.Black.Opacity(0))
+                    }
                 }
             },
-            new Container
+            new PopoverContainer
             {
                 RelativeSizeAxes = Axes.Both,
                 Padding = new MarginPadding { Bottom = 50 },
@@ -151,13 +204,13 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
                             RelativeSizeAxes = Axes.Both,
                             Padding = new MarginPadding(10)
                             {
-                                Top = 80,
-                                Left = 20,
+                                Top = 140,
                                 Bottom = 40
                             },
-                            Child = MapList = new MapList { Alpha = 0 }
+                            Child = MapList = new MapList(sortMode)
                         }
                     },
+                    filterControl = new SearchFilterControls(),
                     searchBar = new SearchBar(),
                     selectMapInfo = new SelectMapInfo
                     {
@@ -196,6 +249,8 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
             },
             modSelector
         };
+
+        Filters.OnChange += searchTracker.Reset;
     }
 
     protected override void LoadComplete()
@@ -204,6 +259,9 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
 
         if (MapStore.CurrentMap.Hash == "dummy" && MapStore.MapSets.Any())
             MapStore.Select(MapStore.GetRandom()?.LowestDifficulty, true);
+
+        sortMode.BindValueChanged(setSortingMode);
+        groupMode.BindValueChanged(setGroupingMode);
 
         Task.Run(() =>
         {
@@ -227,17 +285,37 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
 
     protected override void Dispose(bool isDisposing)
     {
-        base.Dispose(isDisposing);
-
         MapStore.MapSetAdded -= addMapSet;
         MapStore.MapSetUpdated -= replaceMapSet;
         songSelectBlur.ValueChanged -= updateBackgroundBlur;
 
         MapStore.MapSetBindable.ValueChanged -= mapSetBindableChanged;
         MapStore.MapBindable.ValueChanged -= mapBindableChanged;
+
+        Filters.OnChange -= UpdateSearch;
+
+        menuScroll?.Dispose();
+        randomClick?.Dispose();
+        rewindClick?.Dispose();
+
+        Items.ForEach(i => i.Unbind());
+        Items.Clear();
+
+        base.Dispose(isDisposing);
     }
 
     protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent) => dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+
+    private void setSortingMode(ValueChangedEvent<MapUtils.SortingMode> e)
+    {
+        sortItems();
+        MapList.Sort();
+    }
+
+    private void setGroupingMode(ValueChangedEvent<MapUtils.GroupingMode> e)
+    {
+        UpdateSearch();
+    }
 
     private void loadMapSets()
     {
@@ -247,48 +325,67 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
 
         foreach (RealmMapSet set in sets)
         {
-            var entry = new MapListEntry(set)
-            {
-                SelectAction = Accept,
-                EditAction = EditMap,
-                DeleteAction = DeleteMapSet,
-                ExportAction = ExportMapSet
-            };
+            if (!ShouldAdd(set))
+                continue;
 
-            LoadComponent(entry);
-            Schedule(() => MapList.Insert(entry));
-            lookup[set] = entry;
-            Maps.Add(set);
+            var items = createItems(set);
+
+            foreach (var item in items)
+            {
+                Schedule(() => MapList.Insert(item));
+                Items.Add(item);
+            }
         }
 
-        Maps.Sort(MapUtils.CompareSets);
-
-        ScheduleAfterChildren(() => MapList.EndBulkInsert());
+        ScheduleAfterChildren(() =>
+        {
+            sortItems();
+            MapList.EndBulkInsert();
+        });
 
         if (!sets.Any())
             Schedule(noMapsContainer.Show);
+    }
+
+    private IEnumerable<IListItem> createItems(RealmMapSet set)
+    {
+        switch (groupMode.Value)
+        {
+            case MapUtils.GroupingMode.Default:
+            {
+                yield return new MapSetItem(set);
+
+                break;
+            }
+
+            case MapUtils.GroupingMode.Nothing:
+            {
+                foreach (var map in set.Maps)
+                    yield return new MapDifficultyItem(map);
+
+                break;
+            }
+        }
     }
 
     private void addMapSet(RealmMapSet set)
     {
         Scheduler.ScheduleIfNeeded(() =>
         {
-            var entry = new MapListEntry(set)
-            {
-                SelectAction = Accept,
-                EditAction = EditMap,
-                DeleteAction = DeleteMapSet,
-                ExportAction = ExportMapSet
-            };
+            var items = createItems(set);
 
-            LoadComponentAsync(entry, _ =>
+            MapList.StartBulkInsert();
+
+            foreach (var item in items)
             {
-                MapList.Insert(entry);
-                Maps.Add(set);
-                Maps.Sort(MapUtils.CompareSets);
-                lookup[set] = entry;
-                noMapsContainer.Hide();
-            });
+                MapList.Insert(item);
+                Items.Add(item);
+            }
+
+            sortItems();
+            MapList.EndBulkInsert();
+
+            noMapsContainer.Hide();
         });
     }
 
@@ -296,16 +393,22 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
     {
         Schedule(() =>
         {
-            if (lookup.ContainsKey(oldSet))
+            var results = Items.Where(i => i.Matches(oldSet)).ToList();
+
+            foreach (var item in results)
             {
-                MapList.Remove(lookup[oldSet], true);
-                Maps.Remove(oldSet);
-                lookup.Remove(oldSet);
+                MapList.Remove(item);
+                Items.Remove(item);
+                item.Unbind();
             }
 
             addMapSet(newSet);
-            // Schedule(() => { Schedule(() => mapStore.Select(newSet.LowestDifficulty)); }); // <- this looks stupid and probably is, but it works
         });
+    }
+
+    private void sortItems()
+    {
+        Items.Sort((a, b) => a.CompareTo(b));
     }
 
     private void mapSetBindableChanged(ValueChangedEvent<RealmMapSet> e) => selectMapSet(e.NewValue);
@@ -313,13 +416,67 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
 
     private void selectMapSet(RealmMapSet set)
     {
-        if (set == null || !lookup.ContainsKey(set))
+        if (set == null)
             return;
+
+        video.Stop();
+        storyboardCancellationToken?.Cancel();
+
+        if (storyboardContainer.Count > 0)
+            storyboardContainer.ForEach(d => d.FadeOut(FADE_DURATION).Expire());
 
         var previous = MapStore.CurrentMapSet;
 
         if (!Equals(previous, set) || !clock.IsRunning)
             clock.Seek(set.Metadata.PreviewTime);
+
+        if (!backgroundVideo.Value)
+            return;
+
+        storyboardCancellationToken = new CancellationTokenSource();
+        var token = storyboardCancellationToken.Token;
+
+        // it doesn't work for some reason when it has a token
+        // ReSharper disable once MethodSupportsCancellation
+        Task.Run(() =>
+        {
+            var map = set.LowestDifficulty!;
+            var info = map.GetMapInfo();
+
+            video.Map = map;
+            video.Info = info;
+
+            video.LoadVideo();
+            ScheduleAfterChildren(video.Start);
+
+            try
+            {
+                var sb = info?.CreateDrawableStoryboard();
+
+                if (sb == null)
+                    return;
+
+                var layers = Enum.GetValues<StoryboardLayer>();
+
+                foreach (var layer in layers)
+                {
+                    Schedule(() =>
+                    {
+                        LoadComponent(sb); // needed for storage
+                        var wrapper = new DrawableStoryboardWrapper(clock, sb, layer);
+                        LoadComponentAsync(wrapper, s =>
+                        {
+                            storyboardContainer.Add(s);
+                            s.FadeInFromZero(FADE_DURATION);
+                        }, cancellation: token);
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to load storyboard!");
+            }
+        });
     }
 
     private void selectMap(RealmMap map)
@@ -331,11 +488,13 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
         backgrounds.AddBackgroundFromMap(map);
         lightController.FadeColour(FluXisColors.GetKeyColor(map.KeyCount), 400);
 
-        if (lookup.TryGetValue(map.MapSet, out var entry))
-            ScheduleAfterChildren(() => MapList.ScrollTo(entry));
+        var item = Items.FirstOrDefault(i => i.Matches(map));
+
+        if (item is not null)
+            ScheduleAfterChildren(() => MapList.ScrollToItem(item));
     }
 
-    protected virtual void Accept()
+    public virtual void Accept()
     {
         if (MapStore.CurrentMap == null)
             return;
@@ -353,13 +512,14 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
         {
             viewReplay(MapStore.CurrentMap, mods, () =>
             {
-                var map = MapStore.CurrentMap.GetMapInfo();
+                var map = MapStore.CurrentMap.GetMapInfo(mods);
+
                 var autogen = new AutoGenerator(map, MapStore.CurrentMap.KeyCount);
                 return autogen.Generate();
             });
         }
         else
-            this.Push(new GameplayLoader(MapStore.CurrentMap, mods, () => new GameplayScreen(MapStore.CurrentMap, mods)));
+            this.Push(new GameplayLoader(MapStore.CurrentMap, mods, () => new GameplayScreen(MapStore.CurrentMap, mods) { Scores = selectMapInfo.ScoreList.CurrentScores.ToList() }));
     }
 
     public void ViewReplay(RealmMap map, RealmScore score)
@@ -395,70 +555,66 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
         this.Push(new GameplayLoader(map, mods, () =>
         {
             var replay = replayFunc();
-            return replay == null ? null : new ReplayGameplayScreen(map, mods, replay);
+            return replay == null ? null : new ReplayGameplayScreen(map, mods, replay) { Scores = selectMapInfo.ScoreList.CurrentScores.ToList() };
         }));
     }
 
     private void changeSelection(int by = 0, bool last = false)
     {
-        if (Maps.Count == 0)
+        if (Items.Count == 0)
             return;
 
-        int current = Maps.IndexOf(MapStore.CurrentMapSet);
-        current += by;
+        var current = currentItem;
 
-        if (current < 0)
-            current = Maps.Count - 1;
-        else if (current >= Maps.Count)
-            current = 0;
+        int idx = Items.IndexOf(current);
+        idx += by;
 
-        var set = Maps[current];
-        var map = last ? set.HighestDifficulty : set.LowestDifficulty;
-        MapStore.Select(map, true);
+        if (idx < 0)
+            idx = Items.Count - 1;
+        else if (idx >= Items.Count)
+            idx = 0;
+
+        var item = Items[idx];
+        item.Select(last);
     }
 
     private void changeMapSelection(int by = 0)
     {
-        if (!Maps.Contains(MapStore.CurrentMapSet)) return;
+        var item = currentItem;
 
-        var listEntry = lookup[MapStore.CurrentMapSet];
-
-        int current = listEntry.Maps.IndexOf(MapStore.CurrentMap);
-        current += by;
-
-        if (current < 0)
-        {
-            changeSelection(-1, true);
+        if (item is null)
             return;
-        }
 
-        if (current >= listEntry.Maps.Count)
-        {
-            changeSelection(1);
+        if (!item.ChangeChild(by))
             return;
-        }
 
-        MapStore.Select(listEntry.Maps[current], true);
+        changeSelection(by, by < 0);
     }
 
     public void DeleteMapSet(RealmMapSet set)
     {
-        if (set == null)
+        var items = Items.Where(i => i.Matches(set)).ToList();
+
+        if (set == null || items.Count == 0)
             return;
 
         panels.Content ??= new ConfirmDeletionPanel(() =>
         {
-            MapStore.DeleteMapSet(set);
-            MapList.Remove(lookup[set], false);
-            Maps.Remove(set);
-            lookup.Remove(set);
-
             if (Equals(set, MapStore.CurrentMapSet))
                 changeSelection(1);
 
-            if (Maps.Count == 0)
+            MapStore.DeleteMapSet(set);
+
+            foreach (var item in items)
+            {
+                MapList.Remove(item);
+                Items.Remove(item);
+                item.Unbind();
+            }
+
+            if (Items.Count == 0)
                 noMapsContainer.Show();
-        }, itemName: "MapSet");
+        }, itemName: "mapset");
     }
 
     public void ExportMapSet(RealmMapSet set)
@@ -478,14 +634,21 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
 
     public override void OnSuspending(ScreenTransitionEvent e)
     {
-        playExitAnimation();
         clock.Looping = false;
         songSelectBlur.ValueChanged -= updateBackgroundBlur;
+
+        if (e.Next is EditorLoader)
+            this.Delay(EditorLoader.DURATION).FadeOut();
+        else
+            playExitAnimation();
     }
 
     public override void OnResuming(ScreenTransitionEvent e)
     {
-        playEnterAnimation();
+        if (e.Last is EditorLoader)
+            this.FadeIn();
+        else
+            playEnterAnimation();
 
         songSelectBlur.ValueChanged += updateBackgroundBlur;
 
@@ -515,7 +678,7 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
     public override bool OnExiting(ScreenExitEvent e)
     {
         clock.Looping = false;
-        clock.RateTo(1f);
+        clock.RateTo(1f, 400, Easing.Out);
 
         playExitAnimation();
         return base.OnExiting(e);
@@ -536,6 +699,7 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
                          .MoveToX(0, MOVE_DURATION, Easing.OutQuint);
 
             searchBar.Show();
+            filterControl.Show();
             footer.Show();
         }
     }
@@ -547,6 +711,7 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
         MapList.MoveToX(-100, MOVE_DURATION, Easing.OutQuint);
         selectMapInfo.MoveToX(100, MOVE_DURATION, Easing.OutQuint);
         searchBar.Hide();
+        filterControl.Hide();
         footer.Hide();
     }
 
@@ -571,7 +736,7 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
                 return true;
 
             case FluXisGlobalKeybind.Select:
-                Accept();
+                footer.RightButton?.TriggerClick();
                 return true;
 
             case FluXisGlobalKeybind.Back:
@@ -581,7 +746,7 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
                     return true;
                 }
 
-                this.Exit();
+                footer.LeftButton?.TriggerClick();
                 return true;
 
             case FluXisGlobalKeybind.DecreaseRate:
@@ -605,12 +770,14 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
         switch (e.Key)
         {
             case >= Key.F1 and <= Key.F12:
+            {
                 var index = (int)e.Key - (int)Key.F1;
 
                 if (index < footer.ButtonContainer.Count)
                     footer.ButtonContainer[index].TriggerClick();
 
                 return true;
+            }
 
             case Key.PageUp:
                 changeLetter(-1);
@@ -645,10 +812,10 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
 
     private void changeLetter(int by)
     {
-        if (Maps.Count <= 1) // no need to change letter if there's only one map
+        if (Items.Count <= 1) // no need to change letter if there's only one map
             return;
 
-        var current = getLetter(MapStore.CurrentMapSet.Metadata.Title[0]);
+        /*var current = getLetter(MapStore.CurrentMapSet.Metadata.Title[0]);
 
         var index = Array.IndexOf(letters, current);
         index += by;
@@ -656,7 +823,7 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
         if (index < 0) index = letters.Length - 1;
         if (index >= letters.Length) index = 0;
 
-        while (Maps.All(m => getLetter(m.Metadata.Title.FirstOrDefault(' ')) != letters[index]))
+        while (Items.All(m => getLetter(m.Metadata.Title.FirstOrDefault(' ')) != letters[index]))
         {
             index += by;
 
@@ -668,15 +835,17 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
         }
 
         var newLetter = letters[index];
-        changeLetter(newLetter);
+        changeLetter(newLetter);*/
     }
 
     private void changeLetter(char letter)
     {
-        if (Maps.Count <= 1) // no need to change letter if there's only one map
+        if (Items.Count <= 1) // no need to change letter if there's only one map
             return;
 
-        var current = getLetter(MapStore.CurrentMapSet.Metadata.Title[0]);
+        var item = currentItem;
+
+        var current = getLetter(item.Metadata.Title[0]);
 
         if (current == letter)
         {
@@ -684,78 +853,97 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
             return;
         }
 
-        Logger.Log($"Changing letter to {letter}");
-
-        var first = Maps.FirstOrDefault(m => getLetter(m.Metadata.Title.FirstOrDefault(' ')) == letter);
-
-        if (first != null)
-            MapStore.CurrentMapSet = first;
+        var first = Items.FirstOrDefault(i => getLetter(i.Metadata.Title.FirstOrDefault(' ')) == letter);
+        first?.Select();
 
         letterContainer.SetLetter(letter);
     }
 
     private void cycleLetter(char letter)
     {
-        if (Maps.Count <= 1) // no need to change letter if there's only one map
+        if (Items.Count <= 1) // no need to change letter if there's only one map
             return;
 
-        var startingWith = Maps.Where(m => getLetter(m.Metadata.Title.FirstOrDefault(' ')) == letter).ToList();
-        var idx = startingWith.IndexOf(MapStore.CurrentMapSet);
+        var item = currentItem;
 
-        if (idx == -1) return;
+        var startingWith = Items.Where(i => getLetter(i.Metadata.Title.FirstOrDefault(' ')) == letter).ToList();
+        var idx = startingWith.IndexOf(item);
+
+        if (idx == -1)
+            return;
 
         idx++;
         if (idx >= startingWith.Count) idx = 0;
 
-        MapStore.CurrentMapSet = startingWith[idx];
+        var next = startingWith[idx];
+        next.Select();
     }
 
     protected virtual void OnMapsLoaded() { }
+    protected virtual bool ShouldAdd(RealmMapSet set) => true;
 
     protected virtual void UpdateSearch()
     {
-        Maps.Clear();
+        var oldItems = Items.ToList();
 
-        foreach (var child in MapList.Content.Children)
+        foreach (var item in oldItems)
         {
-            bool matches = child.MapSet.Maps.Aggregate(false, (current, map) => current | Filters.Matches(map));
-
-            if (matches)
-            {
-                Maps.Add(child.MapSet);
-                child.Show();
-            }
-            else
-                child.Hide();
+            MapList.Remove(item);
+            Items.Remove(item);
+            item.Unbind();
         }
 
-        Maps.Sort(MapUtils.CompareSets);
+        MapList.StartBulkInsert();
 
-        if (!Maps.Any())
-            noMapsContainer.Show();
-        else
-            noMapsContainer.Hide();
+        foreach (var set in MapStore.MapSets)
+        {
+            if (!ShouldAdd(set))
+                continue;
+
+            var items = createItems(set);
+
+            foreach (var item in items)
+            {
+                if (item.MatchesFilter(Filters))
+                {
+                    Items.Add(item);
+                    MapList.Insert(item);
+                }
+            }
+        }
+
+        ScheduleAfterChildren(() =>
+        {
+            sortItems();
+            MapList.EndBulkInsert();
+
+            if (!Items.Any())
+                noMapsContainer.Show();
+            else
+                noMapsContainer.Hide();
+        });
     }
 
     public void RandomMap()
     {
-        if (Maps.Count == 0)
+        if (Items.Count == 0)
             return;
 
-        var newMap = Maps[RNG.Next(0, Maps.Count)];
-        var currentMap = MapStore.CurrentMapSet;
-
-        MapStore.CurrentMapSet = newMap;
         randomClick?.Play();
+
+        var newItem = Items[RNG.Next(0, Items.Count)];
+        var current = currentItem;
+
+        newItem.Select();
 
         if (randomHistory.Count > 0)
         {
             var last = randomHistory.Last();
-            if (!Equals(last, currentMap))
-                randomHistory.Add(currentMap);
+            if (!Equals(last, current))
+                randomHistory.Add(current);
         }
         else
-            randomHistory.Add(currentMap);
+            randomHistory.Add(current);
     }
 
     public void RewindRandom()
@@ -763,7 +951,7 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
         if (randomHistory.Count <= 0)
             return;
 
-        MapStore.CurrentMapSet = randomHistory.Last();
+        randomHistory.Last().Select();
         randomHistory.RemoveAt(randomHistory.Count - 1);
         rewindClick?.Play();
     }
@@ -782,6 +970,15 @@ public partial class SelectScreen : FluXisScreen, IKeyBindingHandler<FluXisGloba
 
         MapStore.Select(map, true);
         if (MapStore.CurrentMap == null) return;
+
+        if (map.MapSet.AutoImported)
+        {
+            panels.Content = new SingleButtonPanel(
+                FontAwesome6.Solid.ExclamationTriangle,
+                "This map cannot be edited.",
+                "This map is auto-imported from a different game and cannot be opened in the editor.");
+            return;
+        }
 
         var loadedMap = map.GetMapInfo();
         if (loadedMap == null) return;

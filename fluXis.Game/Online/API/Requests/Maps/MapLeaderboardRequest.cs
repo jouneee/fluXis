@@ -1,26 +1,26 @@
-using System;
-using fluXis.Game.Online.API.Models.Scores;
 using fluXis.Game.Screens.Select.Info.Scores;
+using fluXis.Shared.API.Responses.Maps;
+using osu.Framework.IO.Network;
 
 namespace fluXis.Game.Online.API.Requests.Maps;
 
-public class MapLeaderboardRequest : APIRequest<APIScores>
+public class MapLeaderboardRequest : APIRequest<MapLeaderboard>
 {
-    protected override string Path => type switch
-    {
-        ScoreListType.Global => $"/map/{id}/scores",
-        ScoreListType.Country => $"/map/{id}/scores/country",
-        ScoreListType.Friends => $"/map/{id}/scores/friends",
-        ScoreListType.Club => $"/map/{id}/scores/club",
-        _ => throw new ArgumentOutOfRangeException()
-    };
+    protected override string Path => $"/map/{id}/scores";
 
     private ScoreListType type { get; }
-    private int id { get; }
+    private long id { get; }
 
-    public MapLeaderboardRequest(ScoreListType type, int id)
+    public MapLeaderboardRequest(ScoreListType type, long id)
     {
         this.type = type;
         this.id = id;
+    }
+
+    protected override WebRequest CreateWebRequest(string url)
+    {
+        var req = base.CreateWebRequest(url);
+        req.AddParameter("type", type.ToString().ToLower(), RequestParameterType.Query);
+        return req;
     }
 }

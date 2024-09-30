@@ -16,6 +16,9 @@ namespace fluXis.Game.Online.Drawables;
 
 public partial class UserTooltip : Container
 {
+    [Resolved]
+    private UserCache users { get; set; }
+
     public long UserID { get; set; }
 
     private FluXisSpriteText username;
@@ -134,13 +137,13 @@ public partial class UserTooltip : Container
 
     private void loadUser()
     {
-        var user = UserCache.GetUser(UserID);
+        var user = users.Get(UserID);
 
         avatar.UpdateUser(user);
         banner.UpdateUser(user);
         username.Text = user.Username;
         onlineStatus.Text = user.IsOnline ? "Online" : "Offline";
-        lastOnline.Text = user.IsOnline ? "Right Now" : $"Last seen {TimeUtils.Ago(DateTimeOffset.FromUnixTimeSeconds(user.LastLogin))}";
+        lastOnline.Text = user.IsOnline ? "Right Now" : $"Last seen {TimeUtils.Ago(DateTimeOffset.FromUnixTimeSeconds(user.LastLogin ?? 0))}";
 
         Schedule(() => loadingContainer.FadeOut(200));
     }

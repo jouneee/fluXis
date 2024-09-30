@@ -101,27 +101,36 @@ public partial class FluXisScrollContainer<T> : BasicScrollContainer<T> where T 
 
     protected partial class FluXisScrollBar : ScrollbarContainer
     {
+        private Circle circle { get; }
+
         public FluXisScrollBar(Direction direction)
             : base(direction)
         {
-            CornerRadius = 4;
-            Masking = true;
-            Margin = new MarginPadding(2) { Left = -10 };
-
-            Child = new Box
+            Child = circle = new Circle
             {
-                RelativeSizeAxes = Axes.Both,
-                Colour = FluXisColors.Background4
+                RelativeSizeAxes = direction == Direction.Vertical ? Axes.Y : Axes.X,
+                Width = direction == Direction.Vertical ? 8 : 1,
+                Height = direction == Direction.Vertical ? 1 : 8,
+                Colour = FluXisColors.Background4,
+                Blending = BlendingParameters.Additive
             };
         }
 
         public override void ResizeTo(float val, int duration = 0, Easing easing = Easing.None)
         {
-            Vector2 size = new Vector2(8)
+            Vector2 size = new Vector2(10)
             {
                 [(int)ScrollDirection] = val
             };
             this.ResizeTo(size, duration, easing);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            circle.Anchor = Anchor;
+            circle.Origin = Origin;
         }
     }
 }

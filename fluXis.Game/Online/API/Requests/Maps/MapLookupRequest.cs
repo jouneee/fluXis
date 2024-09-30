@@ -1,4 +1,5 @@
 using fluXis.Shared.Components.Maps;
+using osu.Framework.IO.Network;
 
 namespace fluXis.Game.Online.API.Requests.Maps;
 
@@ -6,15 +7,24 @@ public class MapLookupRequest : APIRequest<APIMapLookup>
 {
     protected override string Path => "/maps/lookup";
 
-    private string hash { get; }
+    public string Hash { get; init; }
+    public long MapperID { get; init; }
+    public string Title { get; init; }
+    public string Artist { get; init; }
 
-    public MapLookupRequest(string hash)
+    protected override WebRequest CreateWebRequest(string url)
     {
-        this.hash = hash;
-    }
+        var req = base.CreateWebRequest(url);
 
-    protected override void CreatePostData(FluXisJsonWebRequest<APIMapLookup> request)
-    {
-        request.AddParameter("hash", hash);
+        if (!string.IsNullOrEmpty(Hash))
+            req.AddParameter("hash", Hash);
+        if (MapperID != 0)
+            req.AddParameter("mapper", $"{MapperID}");
+        if (!string.IsNullOrEmpty(Title))
+            req.AddParameter("title", Title);
+        if (!string.IsNullOrEmpty(Artist))
+            req.AddParameter("artist", Artist);
+
+        return req;
     }
 }

@@ -16,6 +16,7 @@ public partial class MultiplayerScreen : FluXisScreen
     public override float BackgroundDim => .5f;
     public override float BackgroundBlur => .2f;
     public override bool AllowMusicControl => false;
+    public override bool AllowMusicPausing => screenStack?.CurrentScreen is MultiSubScreen { AllowMusicPausing: true };
     public override bool AllowExit => canExit();
 
     [Resolved]
@@ -30,6 +31,9 @@ public partial class MultiplayerScreen : FluXisScreen
     [Cached]
     private MultiplayerMenuMusic menuMusic = new();
 
+    public long TargetLobby { get; init; }
+    public string LobbyPassword { get; init; }
+
     private ScreenStack screenStack;
 
     [BackgroundDependencyLoader]
@@ -38,14 +42,23 @@ public partial class MultiplayerScreen : FluXisScreen
         InternalChildren = new Drawable[]
         {
             menuMusic,
-            screenStack = new ScreenStack { RelativeSizeAxes = Axes.Both }
+            screenStack = new ScreenStack
+            {
+                RelativeSizeAxes = Axes.Both,
+                Alpha = 0
+            }
         };
     }
 
     protected override void LoadComplete()
     {
         base.LoadComplete();
-        screenStack.Push(new MultiModeSelect());
+
+        var modes = new MultiModeSelect();
+        screenStack.Push(modes);
+
+        if (TargetLobby > 0)
+            modes.OpenList(TargetLobby, LobbyPassword);
 
         screenStack.ScreenExited += (_, _) =>
         {
@@ -70,7 +83,10 @@ public partial class MultiplayerScreen : FluXisScreen
 
     public override void OnEntering(ScreenTransitionEvent e)
     {
-        globalClock.FadeOut(400).OnComplete(c => c.Stop());
+        using (BeginDelayedSequence(ENTER_DELAY))
+            screenStack.FadeIn(FADE_DURATION);
+
+        globalClock.VolumeOut(400).OnComplete(c => c.Stop());
         backgrounds.AddBackgroundFromMap(null);
     }
 
@@ -82,8 +98,14 @@ public partial class MultiplayerScreen : FluXisScreen
         this.Delay(FADE_DURATION).FadeOut();
 
         globalClock.Start();
-        globalClock.FadeIn(FADE_DURATION);
+        globalClock.VolumeIn(FADE_DURATION);
         backgrounds.AddBackgroundFromMap(mapStore.CurrentMapSet?.Maps[0]);
         return false;
+    }
+
+    public override void OnResuming(ScreenTransitionEvent e)
+    {
+        var screen = screenStack.CurrentScreen as MultiSubScreen;
+        screen?.OnResuming(null);
     }
 }

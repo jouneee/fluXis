@@ -17,8 +17,7 @@ public class RoundhouseMap : RealmMap
         Metadata = new RealmMapMetadata
         {
             Title = "Roundhouse",
-            Artist = "Akiri",
-            PreviewTime = 1443 // this is used as the restart point not actual start time
+            Artist = "Akiri"
         };
     }
 
@@ -29,6 +28,14 @@ public class RoundhouseMap : RealmMap
     public override Track GetTrack()
     {
         var tracks = MapSet.Resources?.TrackStore;
-        return tracks?.Get("Menu/Roundhouse");
+        var track = tracks?.Get("Menu/Roundhouse");
+
+        if (track is not null)
+        {
+            track.RestartPoint = 1443;
+            track.Looping = true;
+        }
+
+        return track;
     }
 }

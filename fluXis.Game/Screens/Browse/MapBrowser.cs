@@ -7,14 +7,20 @@ using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface;
 using fluXis.Game.Graphics.UserInterface.Buttons;
 using fluXis.Game.Graphics.UserInterface.Context;
+using fluXis.Game.Graphics.UserInterface.Panel;
 using fluXis.Game.Input;
-using fluXis.Game.Map.Drawables;
+using fluXis.Game.Localization;
+using fluXis.Game.Map.Drawables.Card;
 using fluXis.Game.Online.Activity;
-using fluXis.Game.Online.API.Models.Maps;
+using fluXis.Game.Online.API;
 using fluXis.Game.Online.API.Requests.MapSets;
 using fluXis.Game.Online.Fluxel;
+using fluXis.Game.Overlay.Auth;
+using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Screens.Browse.Info;
 using fluXis.Game.Screens.Browse.Search;
+using fluXis.Shared.Components.Maps;
+using JetBrains.Annotations;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
@@ -36,7 +42,7 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
     public override UserActivity InitialActivity => new UserActivity.BrowsingMaps();
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     [Resolved]
     private GlobalClock clock { get; set; }
@@ -44,9 +50,25 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
     [Resolved]
     private PreviewManager previews { get; set; }
 
+    [CanBeNull]
+    [Resolved(CanBeNull = true)]
+    private PanelContainer panels { get; set; }
+
+    [CanBeNull]
+    [Resolved(CanBeNull = true)]
+    private MultifactorOverlay mfaOverlay { get; set; }
+
+    [Resolved]
+    private NotificationManager notifications { get; set; }
+
     private readonly Bindable<APIMapSet> selectedSet = new();
 
-    public FillFlowContainer<MapCard> Maps { get; private set; }
+    private bool fetchingMore = true;
+    private bool loadedAll;
+    private string currentQuery = string.Empty;
+
+    private FluXisScrollContainer scroll;
+    private FillFlowContainer<MapCard> maps { get; set; }
     private CornerButton backButton;
     private LoadingIcon loadingIcon;
     private FluXisSpriteText text;
@@ -117,19 +139,32 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
                                     new[] { Empty() },
                                     new Drawable[]
                                     {
-                                        new FluXisContextMenuContainer
+                                        new Container
                                         {
                                             RelativeSizeAxes = Axes.Both,
-                                            Child = new FluXisScrollContainer
+                                            Children = new Drawable[]
                                             {
-                                                RelativeSizeAxes = Axes.Both,
-                                                ScrollbarAnchor = Anchor.TopLeft,
-                                                Child = Maps = new FillFlowContainer<MapCard>
+                                                new FluXisContextMenuContainer
                                                 {
-                                                    RelativeSizeAxes = Axes.X,
-                                                    AutoSizeAxes = Axes.Y,
-                                                    Direction = FillDirection.Full,
-                                                    Spacing = new Vector2(20)
+                                                    RelativeSizeAxes = Axes.Both,
+                                                    Child = scroll = new FluXisScrollContainer
+                                                    {
+                                                        RelativeSizeAxes = Axes.Both,
+                                                        ScrollbarAnchor = Anchor.TopLeft,
+                                                        Child = maps = new FillFlowContainer<MapCard>
+                                                        {
+                                                            RelativeSizeAxes = Axes.X,
+                                                            AutoSizeAxes = Axes.Y,
+                                                            Direction = FillDirection.Full,
+                                                            Spacing = new Vector2(20)
+                                                        }
+                                                    }
+                                                },
+                                                loadingIcon = new LoadingIcon
+                                                {
+                                                    Anchor = Anchor.Centre,
+                                                    Origin = Anchor.Centre,
+                                                    Size = new Vector2(100)
                                                 }
                                             }
                                         }
@@ -147,8 +182,8 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
             },
             backButton = new CornerButton
             {
-                Icon = FontAwesome6.Solid.ChevronLeft,
-                ButtonText = "Back",
+                Icon = FontAwesome6.Solid.AngleLeft,
+                ButtonText = LocalizationStrings.General.Back,
                 Action = this.Exit
             },
             text = new FluXisSpriteText
@@ -157,12 +192,6 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
                 Origin = Anchor.Centre,
                 Alpha = 0,
                 FontSize = 30
-            },
-            loadingIcon = new LoadingIcon
-            {
-                Anchor = Anchor.Centre,
-                Origin = Anchor.Centre,
-                Size = new Vector2(100)
             }
         };
     }
@@ -171,7 +200,7 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
     {
         base.LoadComplete();
 
-        if (fluxel.Status != ConnectionStatus.Online)
+        if (api.Status.Value != ConnectionStatus.Online)
         {
             text.Text = "You are not connected to the server!";
             text.FadeInFromZero(20);
@@ -182,26 +211,36 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
         loadMapsets();
     }
 
-    private void loadMapsets()
+    protected override void Update()
     {
-        var req = new MapSetsRequest();
-        req.PerformAsync(fluxel);
+        base.Update();
+
+        if (scroll.IsScrolledToEnd() && !fetchingMore && !loadedAll)
+            loadMapsets(maps.Count);
+    }
+
+    private void loadMapsets(long offset = 0, bool reload = false)
+    {
+        fetchingMore = true;
+        loadingIcon.Show();
+
+        if (reload)
+            maps.Clear();
+
+        var req = new MapSetsRequest(offset, currentQuery);
         req.Success += response =>
         {
-            if (response.Status != 200)
-            {
-                Logger.Log($"Failed to load mapsets: {response.Status} {response.Message}", LoggingTarget.Network);
-                loadingIcon.Hide();
-                return;
-            }
+            if (response.Data.Count == 0)
+                loadedAll = true;
 
             foreach (var mapSet in response.Data)
             {
-                Maps.Add(new MapCard(mapSet)
+                maps.Add(new MapCard(mapSet)
                 {
                     Anchor = Anchor.TopCentre,
                     Origin = Anchor.TopCentre,
                     EdgeEffect = FluXisStyles.ShadowSmall,
+                    RequestDelete = confirmDeleteMapSet,
                     OnClickAction = set =>
                     {
                         previews.PlayPreview(set.ID);
@@ -210,8 +249,20 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
                 });
             }
 
+            // needed, else it does 2 request when entering
+            ScheduleAfterChildren(() => fetchingMore = false);
             loadingIcon.Hide();
         };
+
+        req.Failure += e =>
+        {
+            Logger.Log($"Failed to load mapsets: {e.Message}", LoggingTarget.Network);
+            fetchingMore = false;
+            loadedAll = true;
+            loadingIcon.Hide();
+        };
+
+        api.PerformRequestAsync(req);
     }
 
     public override void OnEntering(ScreenTransitionEvent e)
@@ -223,7 +274,7 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
             this.FadeInFromZero(FADE_DURATION);
             backButton.Show();
 
-            clock.FadeOut(FADE_DURATION);
+            clock.VolumeOut(FADE_DURATION);
             clock.Delay(FADE_DURATION).OnComplete(_ => clock.Stop());
         }
     }
@@ -236,7 +287,7 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
         previews.StopPreview();
 
         clock.Start();
-        clock.FadeIn(FADE_DURATION);
+        clock.VolumeIn(FADE_DURATION);
         return false;
     }
 
@@ -256,28 +307,45 @@ public partial class MapBrowser : FluXisScreen, IKeyBindingHandler<FluXisGlobalK
 
     public void Search(string query)
     {
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            foreach (var map in Maps)
-                map.Show();
+        currentQuery = query;
+        loadMapsets(reload: true);
+    }
 
+    private void confirmDeleteMapSet(long id)
+    {
+        if (panels == null || mfaOverlay == null)
             return;
-        }
 
-        foreach (var map in Maps)
+        var panel = new ConfirmDeletionPanel(deleteMapSet, itemName: "MapSet");
+        panels.Content = panel;
+
+        void deleteMapSet()
         {
-            var matches = false;
-            matches |= map.MapSet.Title?.ToLower().Contains(query.ToLower()) ?? false;
-            matches |= map.MapSet.Artist?.ToLower().Contains(query.ToLower()) ?? false;
-            matches |= map.MapSet.Creator?.Username.ToLower().Contains(query.ToLower()) ?? false;
-            matches |= map.MapSet.Creator?.DisplayName?.ToLower().Contains(query.ToLower()) ?? false;
-            matches |= map.MapSet.Tags?.Any(tag => tag.ToLower().Contains(query.ToLower())) ?? false;
-            matches |= map.MapSet.Source?.ToLower().Contains(query.ToLower()) ?? false;
+            var pnl = panels?.Content as Panel;
+            pnl?.StartLoading();
 
-            if (matches)
-                map.Show();
-            else
-                map.Hide();
+            var req = new MapSetDeleteRequest(id);
+
+            req.Failure += ex =>
+            {
+                pnl?.StopLoading();
+
+                if (ex.Message == APIRequest.MULTIFACTOR_REQUIRED)
+                {
+                    mfaOverlay?.Show(deleteMapSet);
+                    return;
+                }
+
+                notifications.SendError("An error occurred while deleting this mapset.", ex.Message);
+            };
+
+            req.Success += _ =>
+            {
+                maps.FirstOrDefault(x => x.MapSet.ID == id)?.Expire();
+                pnl?.StopLoading();
+            };
+
+            api.PerformRequest(req);
         }
     }
 }

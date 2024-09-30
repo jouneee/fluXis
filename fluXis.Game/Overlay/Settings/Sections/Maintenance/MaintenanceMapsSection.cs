@@ -2,6 +2,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using fluXis.Game.Database;
 using fluXis.Game.Database.Maps;
+using fluXis.Game.Database.Score;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Localization;
 using fluXis.Game.Localization.Categories.Settings;
@@ -46,6 +47,13 @@ public partial class MaintenanceMapsSection : SettingsSubSection
                 Description = strings.RecalculateFiltersDescription,
                 ButtonText = "Run",
                 Action = recalculateFilters
+            },
+            new SettingsButton
+            {
+                Label = strings.CleanUpScores,
+                Description = strings.CleanUpScoresDescription,
+                ButtonText = "Run",
+                Action = clearScores
             }
         });
     }
@@ -86,6 +94,13 @@ public partial class MaintenanceMapsSection : SettingsSubSection
                             continue;
 
                         var data = map.GetMapInfo();
+
+                        if (data is null)
+                            continue;
+
+                        existing.AccuracyDifficulty = map.AccuracyDifficulty = data.AccuracyDifficulty;
+                        existing.HealthDifficulty = map.HealthDifficulty = data.HealthDifficulty;
+
                         var events = data.GetMapEvents();
 
                         var filters = MapUtils.GetMapFilters(data, events);
@@ -98,5 +113,27 @@ public partial class MaintenanceMapsSection : SettingsSubSection
             notification.State = LoadingState.Complete;
             isRunning = false;
         });
+    }
+
+    private void clearScores()
+    {
+        var count = 0;
+
+        realm.RunWrite(r =>
+        {
+            var scores = r.All<RealmScore>().ToList();
+            var maps = r.All<RealmMap>().ToList();
+
+            foreach (var score in scores)
+            {
+                if (maps.Any(m => m.ID == score.MapID))
+                    continue;
+
+                count++;
+                r.Remove(score);
+            }
+        });
+
+        notifications.SendSmallText($"Removed {count} scores.", FontAwesome6.Solid.Check);
     }
 }

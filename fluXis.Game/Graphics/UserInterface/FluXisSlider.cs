@@ -43,7 +43,7 @@ public partial class FluXisSlider<T> : Container where T : struct, INumber<T>, I
         {
             leftIcon = new ClickableSpriteIcon
             {
-                Icon = FontAwesome6.Solid.ChevronLeft,
+                Icon = FontAwesome6.Solid.AngleLeft,
                 Size = new Vector2(10),
                 Anchor = Anchor.CentreLeft,
                 Origin = Anchor.CentreLeft,
@@ -71,7 +71,7 @@ public partial class FluXisSlider<T> : Container where T : struct, INumber<T>, I
             },
             rightIcon = new ClickableSpriteIcon
             {
-                Icon = FontAwesome6.Solid.ChevronRight,
+                Icon = FontAwesome6.Solid.AngleRight,
                 Size = new Vector2(10),
                 Anchor = Anchor.CentreRight,
                 Origin = Anchor.CentreRight,
@@ -81,7 +81,7 @@ public partial class FluXisSlider<T> : Container where T : struct, INumber<T>, I
             }
         };
 
-        valueChange = samples.Get("UI/slider-scroll");
+        valueChange = samples.Get("UI/slider-tick");
         valueChange?.AddAdjustment(AdjustableProperty.Frequency, valueChangePitch = new BindableDouble(1f));
     }
 

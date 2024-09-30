@@ -1,9 +1,10 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using fluXis.Import.osu.Map.Components;
 using fluXis.Game.Map;
 using fluXis.Game.Map.Structures;
+using fluXis.Import.osu.AutoImport;
+using JetBrains.Annotations;
 
 namespace fluXis.Import.osu.Map;
 
@@ -57,12 +58,13 @@ public class OsuMap
         return "";
     }
 
-    public MapInfo ToMapInfo()
+    [CanBeNull]
+    public OsuMapInfo ToMapInfo()
     {
         if (Mode != 3)
-            throw new Exception("Only osu!mania maps are supported.");
+            return null;
 
-        var mapInfo = new MapInfo
+        var mapInfo = new OsuMapInfo()
         {
             Metadata = new MapMetadata
             {
@@ -70,11 +72,11 @@ public class OsuMap
                 Artist = Artist?.Trim() ?? "",
                 Mapper = Creator?.Trim() ?? "",
                 Difficulty = Version?.Trim() ?? "",
-                Source = Source?.Trim() ?? "",
+                AudioSource = Source?.Trim() ?? "",
                 Tags = Tags?.Trim() ?? "",
                 PreviewTime = PreviewTime
             },
-            AudioFile = AudioFilename.Trim(),
+            AudioFile = AudioFilename?.Trim(),
             BackgroundFile = "",
             HitObjects = new List<HitObject>(),
             TimingPoints = new List<TimingPoint>(),

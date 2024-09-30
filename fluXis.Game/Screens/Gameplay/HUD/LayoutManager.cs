@@ -4,8 +4,8 @@ using System.IO;
 using System.Linq;
 using fluXis.Game.Configuration;
 using fluXis.Game.Screens.Gameplay.HUD.Components;
-using fluXis.Game.Utils;
 using fluXis.Shared.Utils;
+using Newtonsoft.Json;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
@@ -25,14 +25,13 @@ public partial class LayoutManager : Component
     [Resolved]
     private FluXisConfig config { get; set; }
 
-    [Resolved]
-    private Storage storage { get; set; }
-
+    private Storage storage;
     private Bindable<string> layoutName;
 
     [BackgroundDependencyLoader]
-    private void load()
+    private void load(Storage baseStorage)
     {
+        storage = baseStorage.GetStorageForDirectory("layouts");
         layoutName = config.GetBindable<string>(FluXisSetting.LayoutName);
         Reload();
 
@@ -65,39 +64,52 @@ public partial class LayoutManager : Component
             ID = id
         };
 
-        var path = Path.Combine(storage.GetFullPath("layouts"), $"{id}.json");
+        var path = storage.GetFullPath($"{id}.json");
         File.WriteAllText(path, layout.Serialize(true));
 
         Layouts.Add(layout);
         Layout.Value = layout;
         Reloaded?.Invoke();
 
-        PathUtils.ShowFile(path);
+        storage.PresentFileExternally(path);
+    }
+
+    public void PresentExternally()
+    {
+        var current = Layout.Value;
+
+        if (current is DefaultLayout)
+        {
+            storage.PresentExternally();
+            return;
+        }
+
+        var path = storage.GetFullPath($"{Layout.Value.ID}.json");
+        storage.PresentFileExternally(path);
     }
 
     private void loadLayouts()
     {
-        var dirPath = storage.GetFullPath("layouts");
-
-        if (!Directory.Exists(dirPath))
-            Directory.CreateDirectory(dirPath);
-
-        var files = Directory.GetFiles(dirPath, "*.json");
+        var files = storage.GetFiles(".", "*.json");
 
         foreach (var file in files)
         {
             try
             {
-                var layout = File.ReadAllText(file).Deserialize<HUDLayout>();
+                var path = storage.GetFullPath(file);
+                var layout = File.ReadAllText(path).Deserialize<HUDLayout>();
 
-                layout.ID = Path.GetFileNameWithoutExtension(file);
+                layout.ID = Path.GetFileNameWithoutExtension(path);
                 Layouts.Add(layout);
 
                 Logger.Log($"Loaded layout {layout.ID}", LoggingTarget.Runtime, LogLevel.Debug);
             }
-            catch
+            catch (Exception ex)
             {
-                Logger.Log($"Failed to load layout {Path.GetFileName(file)}", LoggingTarget.Runtime, LogLevel.Error);
+                if (ex is JsonReaderException)
+                    Logger.Log($"Failed to parse layout '{Path.GetFileName(file)}'! {ex.Message}", LoggingTarget.Runtime, LogLevel.Error);
+                else
+                    Logger.Error(ex, $"Failed to load layout {Path.GetFileName(file)}!");
             }
         }
     }
@@ -128,7 +140,8 @@ public partial class LayoutManager : Component
                         Settings = new Dictionary<string, object>
                         {
                             { "type", AttributeType.Title },
-                            { "size", 48d }
+                            { "size", 32d },
+                            { "max-width", 512d }
                         }
                     }
                 },
@@ -142,7 +155,9 @@ public partial class LayoutManager : Component
                         Settings = new Dictionary<string, object>
                         {
                             { "type", AttributeType.Artist },
-                            { "text", "by {value}" }
+                            { "text", "by {value}" },
+                            { "size", 24d },
+                            { "max-width", 512d }
                         }
                     }
                 },
@@ -156,7 +171,8 @@ public partial class LayoutManager : Component
                         Settings = new Dictionary<string, object>
                         {
                             { "type", AttributeType.Difficulty },
-                            { "size", 48d }
+                            { "size", 32d },
+                            { "max-width", 512d }
                         }
                     }
                 },
@@ -170,7 +186,9 @@ public partial class LayoutManager : Component
                         Settings = new Dictionary<string, object>
                         {
                             { "type", AttributeType.Mapper },
-                            { "text", "mapped by {value}" }
+                            { "text", "mapped by {value}" },
+                            { "size", 24d },
+                            { "max-width", 512d }
                         }
                     }
                 },
@@ -181,7 +199,11 @@ public partial class LayoutManager : Component
                         AnchorToPlayfield = true,
                         Anchor = Anchor.Centre,
                         Origin = Anchor.Centre,
-                        Position = new Vector2(0, -32)
+                        Position = new Vector2(0, -32),
+                        Settings = new Dictionary<string, object>
+                        {
+                            { "scale-additive", true }
+                        }
                     }
                 },
                 {

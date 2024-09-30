@@ -1,31 +1,21 @@
 using System;
-using fluXis.Shared.Scoring.Enums;
 using fluXis.Shared.Scoring.Structs;
 
 namespace fluXis.Game.Scoring.Processing.Health;
 
 public class DrainHealthProcessor : HealthProcessor
 {
-    public float HealthDrainRate { get; private set; }
-    private float lastTime;
+    public double HealthDrainRate { get; private set; }
+    private double lastTime;
+
+    public DrainHealthProcessor(float difficulty)
+        : base(difficulty)
+    {
+    }
 
     public override void AddResult(HitResult result)
     {
-        HealthDrainRate -= GetHealthIncreaseFor(result);
-    }
-
-    protected override float GetHealthIncreaseFor(HitResult result)
-    {
-        return result.Judgement switch
-        {
-            Judgement.Miss => -4f,
-            Judgement.Okay => -2f,
-            Judgement.Alright => -.5f,
-            Judgement.Great => -.25f,
-            Judgement.Perfect => 0f,
-            Judgement.Flawless => .25f,
-            _ => 0f
-        };
+        HealthDrainRate -= GetHealthIncreaseFor(result, Difficulty);
     }
 
     public override void Update()
@@ -34,24 +24,24 @@ public class DrainHealthProcessor : HealthProcessor
 
         if (lastTime == 0)
         {
-            lastTime = (float)GameplayClock.CurrentTime;
+            lastTime = GameplayClock.CurrentTime;
             return;
         }
 
         if (Screen.Playfield.Manager.Break)
         {
             // assign the time so that it doesn't jump when the break ends
-            lastTime = (float)GameplayClock.CurrentTime;
+            lastTime = GameplayClock.CurrentTime;
             return;
         }
 
-        var delta = (float)GameplayClock.CurrentTime - lastTime;
+        var delta = GameplayClock.CurrentTime - lastTime;
 
-        HealthDrainRate = Math.Max(HealthDrainRate, -1f);
+        HealthDrainRate = Math.Clamp(HealthDrainRate, -1f, 2f);
         Health.Value -= HealthDrainRate * (delta / 1000f);
-        HealthDrainRate += 0.001f * delta;
+        HealthDrainRate += 0.00016f * Difficulty * delta;
 
-        lastTime = (float)GameplayClock.CurrentTime;
+        lastTime = GameplayClock.CurrentTime;
 
         if (Health.Value == 0)
             TriggerFailure();

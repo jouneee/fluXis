@@ -6,6 +6,7 @@ using fluXis.Game.Database.Maps;
 using fluXis.Game.Map.Structures;
 using fluXis.Game.Storyboards;
 using fluXis.Game.Storyboards.Drawables;
+using fluXis.Game.Utils;
 using fluXis.Shared.Utils;
 using JetBrains.Annotations;
 using Newtonsoft.Json;
@@ -20,6 +21,8 @@ public class MapInfo
     public string VideoFile { get; set; } = string.Empty;
     public string EffectFile { get; set; } = string.Empty;
     public string StoryboardFile { get; set; } = string.Empty;
+
+    [JsonProperty("metadata")]
     public MapMetadata Metadata { get; set; }
 
     [JsonProperty("colors")]
@@ -31,12 +34,13 @@ public class MapInfo
     public List<HitSoundFade> HitSoundFades { get; set; }
 
     public float AccuracyDifficulty { get; set; } = 8;
+    public float HealthDifficulty { get; set; } = 8;
 
     [JsonIgnore]
-    public float StartTime => HitObjects[0].Time;
+    public double StartTime => HitObjects[0].Time;
 
     [JsonIgnore]
-    public float EndTime => HitObjects[^1].EndTime;
+    public double EndTime => HitObjects[^1].EndTime;
 
     [JsonIgnore]
     public int MaxCombo
@@ -65,6 +69,12 @@ public class MapInfo
 
     [JsonIgnore]
     public string Hash { get; set; }
+
+    [JsonIgnore]
+    public string EffectHash { get; private set; }
+
+    [JsonIgnore]
+    public string StoryboardHash { get; private set; }
 
     public MapInfo(MapMetadata metadata)
         : this()
@@ -147,39 +157,62 @@ public class MapInfo
             return events;
 
         var content = File.ReadAllText(MapFiles.GetFullPath(effectFile));
+        EffectHash = MapUtils.GetHash(content);
         return MapEvents.Load<T>(content);
     }
 
+    [CanBeNull]
     public virtual Storyboard GetStoryboard()
     {
         var file = Map?.MapSet.GetPathForFile(StoryboardFile);
 
         if (string.IsNullOrEmpty(file))
-            return new Storyboard();
+            return null;
 
         var path = MapFiles.GetFullPath(file);
 
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            return new Storyboard();
+            return null;
 
         var json = File.ReadAllText(path);
+        StoryboardHash = MapUtils.GetHash(json);
         return json.Deserialize<Storyboard>();
     }
 
+    [CanBeNull]
     public virtual DrawableStoryboard CreateDrawableStoryboard()
     {
         var sb = GetStoryboard();
+
+        if (sb == null)
+            return null;
+
         var folderName = Map?.MapSet.ID.ToString();
 
         if (string.IsNullOrEmpty(folderName))
-            return new DrawableStoryboard(sb, ".");
+            return null;
 
         var path = MapFiles.GetFullPath(folderName);
 
         if (!Directory.Exists(path))
-            return new DrawableStoryboard(sb, ".");
+            return null;
 
         return new DrawableStoryboard(sb, MapFiles.GetFullPath(Map!.MapSet.ID.ToString()));
+    }
+
+    public virtual Stream GetVideoStream()
+    {
+        var file = Map?.MapSet.GetPathForFile(VideoFile);
+
+        if (string.IsNullOrEmpty(file))
+            return null;
+
+        var path = MapFiles.GetFullPath(file);
+
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            return null;
+
+        return File.OpenRead(path);
     }
 
     public TimingPoint GetTimingPoint(double time)
@@ -200,22 +233,5 @@ public class MapInfo
         return timingPoint ?? TimingPoints[0];
     }
 
-    public MapInfo Clone()
-    {
-        return new MapInfo(Metadata)
-        {
-            AudioFile = AudioFile,
-            BackgroundFile = BackgroundFile,
-            CoverFile = CoverFile,
-            VideoFile = VideoFile,
-            EffectFile = EffectFile,
-            HitObjects = HitObjects,
-            TimingPoints = TimingPoints,
-            ScrollVelocities = ScrollVelocities,
-            HitSoundFades = HitSoundFades,
-            InitialKeyCount = InitialKeyCount,
-            AccuracyDifficulty = AccuracyDifficulty,
-            Map = Map
-        };
-    }
+    public override string ToString() => $"{Hash} - {EffectHash} - {StoryboardHash}";
 }

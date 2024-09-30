@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using fluXis.Game.Audio;
+using fluXis.Game.Configuration;
 using fluXis.Game.Database;
 using fluXis.Game.Database.Maps;
 using fluXis.Game.Database.Score;
@@ -14,13 +15,19 @@ using fluXis.Game.Graphics.UserInterface;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Graphics.UserInterface.Context;
 using fluXis.Game.IO;
+using fluXis.Game.Localization;
 using fluXis.Game.Map;
-using fluXis.Game.Online.API.Models.Scores;
+using fluXis.Game.Online;
+using fluXis.Game.Online.API;
 using fluXis.Game.Online.API.Requests.Maps;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Overlay.Notifications.Tasks;
+using fluXis.Game.Scoring;
+using fluXis.Game.Utils.Extensions;
+using fluXis.Shared.Components.Scores;
 using fluXis.Shared.Replays;
+using fluXis.Shared.Scoring;
 using fluXis.Shared.Utils;
 using JetBrains.Annotations;
 using osu.Framework.Allocation;
@@ -44,7 +51,13 @@ public partial class ScoreList : GridContainer
     private FluXisRealm realm { get; set; }
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private ScoreManager scoreManager { get; set; }
+
+    [Resolved]
+    private IAPIClient api { get; set; }
+
+    [Resolved]
+    private UserCache users { get; set; }
 
     [Resolved]
     private MapStore maps { get; set; }
@@ -58,21 +71,25 @@ public partial class ScoreList : GridContainer
     [Resolved(CanBeNull = true)]
     private SelectScreen screen { get; set; }
 
+    public IEnumerable<ScoreInfo> CurrentScores => scrollContainer.ScrollContent.Children.Select(c => c.ScoreInfo);
+
     private RealmMap map;
-    private ScoreListType type = ScoreListType.Local;
+    private Bindable<ScoreListType> type;
 
     private CancellationTokenSource cancellationTokenSource;
     private CancellationToken cancellationToken;
 
     private FillFlowContainer outOfDateContainer;
     private FluXisSpriteText noScoresText;
-    private FluXisScrollContainer scrollContainer;
+    private FluXisScrollContainer<ScoreListEntry> scrollContainer;
     private FillFlowContainer<LeaderboardTypeButton> typeSwitcher;
     private LoadingIcon loadingIcon;
 
     [BackgroundDependencyLoader]
-    private void load()
+    private void load(FluXisConfig config)
     {
+        type = config.GetBindable<ScoreListType>(FluXisSetting.LeaderboardType);
+
         RelativeSizeAxes = Axes.Both;
         RowDimensions = new[]
         {
@@ -100,27 +117,47 @@ public partial class ScoreList : GridContainer
                             RelativeSizeAxes = Axes.Both,
                             Colour = FluXisColors.Background2
                         },
-                        new FluXisSpriteText
+                        new GridContainer
                         {
-                            Text = "Scores",
-                            FontSize = 32,
-                            Shear = new Vector2(.1f, 0),
-                            Anchor = Anchor.CentreLeft,
-                            Origin = Anchor.CentreLeft,
-                            X = 20
-                        },
-                        typeSwitcher = new FillFlowContainer<LeaderboardTypeButton>
-                        {
-                            AutoSizeAxes = Axes.Both,
-                            Direction = FillDirection.Horizontal,
-                            Anchor = Anchor.CentreRight,
-                            Origin = Anchor.CentreRight,
-                            X = -40,
-                            Children = Enum.GetValues<ScoreListType>().Select(t => new LeaderboardTypeButton
+                            RelativeSizeAxes = Axes.Both,
+                            ColumnDimensions = new[]
                             {
-                                Type = t,
-                                ScoreList = this
-                            }).ToList()
+                                new Dimension(),
+                                new Dimension(GridSizeMode.AutoSize)
+                            },
+                            Content = new[]
+                            {
+                                new Drawable[]
+                                {
+                                    new Container
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        Padding = new MarginPadding { Horizontal = 20 },
+                                        Child = new TruncatingText()
+                                        {
+                                            Text = LocalizationStrings.SongSelect.LeaderboardTitle,
+                                            RelativeSizeAxes = Axes.X,
+                                            Anchor = Anchor.CentreLeft,
+                                            Origin = Anchor.CentreLeft,
+                                            Shear = new Vector2(.1f, 0),
+                                            FontSize = 32
+                                        }
+                                    },
+                                    typeSwitcher = new FillFlowContainer<LeaderboardTypeButton>
+                                    {
+                                        AutoSizeAxes = Axes.Both,
+                                        Direction = FillDirection.Horizontal,
+                                        Anchor = Anchor.CentreRight,
+                                        Origin = Anchor.CentreRight,
+                                        Padding = new MarginPadding { Right = 40 },
+                                        Children = Enum.GetValues<ScoreListType>().Select(t => new LeaderboardTypeButton
+                                        {
+                                            Type = t,
+                                            ScoreList = this
+                                        }).ToList()
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -135,16 +172,24 @@ public partial class ScoreList : GridContainer
                     {
                         noScoresText = new FluXisSpriteText
                         {
-                            Text = "No scores yet!",
+                            Text = LocalizationStrings.SongSelect.LeaderboardNoScores,
                             FontSize = 32,
                             Anchor = Anchor.Centre,
                             Origin = Anchor.Centre,
                             Alpha = 0
                         },
-                        scrollContainer = new FluXisScrollContainer
+                        new Container
                         {
                             RelativeSizeAxes = Axes.Both,
-                            ScrollbarAnchor = Anchor.TopRight
+                            Padding = new MarginPadding { Right = 10 },
+                            Masking = true,
+                            Child = scrollContainer = new FluXisScrollContainer<ScoreListEntry>
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                ScrollbarAnchor = Anchor.TopRight,
+                                ScrollbarOverlapsContent = false,
+                                Masking = false
+                            }
                         },
                         loadingIcon = new LoadingIcon
                         {
@@ -174,7 +219,7 @@ public partial class ScoreList : GridContainer
                                 },
                                 new FluXisSpriteText
                                 {
-                                    Text = "Your local version of this map is out of date!",
+                                    Text = LocalizationStrings.SongSelect.LeaderboardOutOfDate,
                                     FontSize = 24,
                                     Shadow = true,
                                     Anchor = Anchor.CentreLeft,
@@ -190,7 +235,7 @@ public partial class ScoreList : GridContainer
 
     protected override void LoadComplete()
     {
-        ScheduleAfterChildren(() => setType(ScoreListType.Local));
+        ScheduleAfterChildren(() => setType(type.Value));
 
         maps.MapBindable.BindValueChanged(onMapChanged, true);
     }
@@ -204,7 +249,7 @@ public partial class ScoreList : GridContainer
 
     private void setType(ScoreListType type)
     {
-        this.type = type;
+        this.type.Value = type;
         typeSwitcher.Children.ForEach(c => c.Selected = c.Type == type);
     }
 
@@ -243,42 +288,34 @@ public partial class ScoreList : GridContainer
     {
         List<ScoreListEntry> scores = new();
 
-        switch (type)
+        switch (type.Value)
         {
             case ScoreListType.Local:
-                realm?.Run(r => r.All<RealmScore>().ToList().ForEach(s =>
+                scoreManager.OnMap(map.ID).ForEach(s =>
                 {
-                    if (s.MapID == map.ID)
+                    var info = s.ToScoreInfo();
+                    var detach = s.Detach();
+
+                    scores.Add(new ScoreListEntry
                     {
-                        var info = s.ToScoreInfo();
-                        var detach = s.Detach();
-
-                        scores.Add(new ScoreListEntry
+                        ScoreInfo = info,
+                        Map = map,
+                        Player = users.Get(info.PlayerID),
+                        ShowSelfOutline = false,
+                        DeleteAction = () =>
                         {
-                            ScoreInfo = info,
-                            Map = map,
-                            Player = s.Player,
-                            DeleteAction = () =>
-                            {
-                                realm.RunWrite(r2 =>
-                                {
-                                    var realmScore = r2.Find<RealmScore>(detach.ID);
-
-                                    if (realmScore == null)
-                                        return;
-
-                                    r2.Remove(realmScore);
-                                });
-
-                                Refresh();
-                            },
-                            ReplayAction = replays.Exists(s.ID) ? () => screen?.ViewReplay(map, detach) : null
-                        });
-                    }
-                }));
+                            scoreManager.Delete(detach.ID);
+                            Refresh();
+                        },
+                        ReplayAction = replays.Exists(s.ID) ? () => screen?.ViewReplay(map, detach) : null
+                    });
+                });
                 break;
 
-            case ScoreListType.Global or ScoreListType.Country or ScoreListType.Club:
+            case ScoreListType.Global
+                or ScoreListType.Country
+                or ScoreListType.Friends
+                or ScoreListType.Club:
                 if (map.OnlineID == -1)
                 {
                     showNotSubmittedError();
@@ -306,11 +343,15 @@ public partial class ScoreList : GridContainer
             if (cancellationToken.IsCancellationRequested)
                 return;
 
-            scores.Sort((a, b) => b.ScoreInfo.Score.CompareTo(a.ScoreInfo.Score));
+            scores.Sort((a, b) =>
+            {
+                var res = b.ScoreInfo.PerformanceRating.CompareTo(a.ScoreInfo.PerformanceRating);
+                return res == 0 ? b.ScoreInfo.Score.CompareTo(a.ScoreInfo.Score) : res;
+            });
             scores.ForEach(s => addScore(s, scores.IndexOf(s) + 1));
 
             if (scrollContainer.ScrollContent.Children.Count == 0)
-                noScoresText.Text = map.MapSet.Managed ? "Scores are not available for this map!" : "No scores yet!";
+                noScoresText.Text = map.MapSet.AutoImported ? LocalizationStrings.SongSelect.LeaderboardScoresUnavailable : LocalizationStrings.SongSelect.LeaderboardNoScores;
 
             noScoresText.FadeTo(scrollContainer.ScrollContent.Children.Count == 0 ? 1 : 0, 200);
             loadingIcon.FadeOut(200);
@@ -319,7 +360,7 @@ public partial class ScoreList : GridContainer
 
     private void showNotSubmittedError()
     {
-        noScoresText.Text = "This map is not submitted online!";
+        noScoresText.Text = LocalizationStrings.SongSelect.LeaderboardNotUploaded;
         Schedule(() =>
         {
             noScoresText.FadeIn(200);
@@ -330,15 +371,26 @@ public partial class ScoreList : GridContainer
     [CanBeNull]
     private List<ScoreListEntry> getScores(CancellationToken cancellationToken)
     {
-        var req = new MapLeaderboardRequest(type, map.OnlineID);
-        req.Perform(fluxel);
+        if (!api.IsLoggedIn)
+        {
+            noScoresText.Text = LocalizationStrings.General.LoginToUse;
+            Schedule(() =>
+            {
+                noScoresText.FadeIn(200);
+                loadingIcon.FadeOut(200);
+            });
+            return null;
+        }
+
+        var req = new MapLeaderboardRequest(type.Value, map.OnlineID);
+        api.PerformRequest(req);
 
         if (cancellationToken.IsCancellationRequested)
             return null;
 
-        if (req.Response.Status != 200)
+        if (!req.IsSuccessful)
         {
-            noScoresText.Text = req.Response.Message;
+            noScoresText.Text = req.FailReason?.Message ?? APIRequest.UNKNOWN_ERROR;
             Schedule(() =>
             {
                 noScoresText.FadeTo(1, 200);
@@ -356,7 +408,13 @@ public partial class ScoreList : GridContainer
             if (m == null)
                 return;
 
-            m.OnlineHash = map.OnlineHash = onlineMap.Hash;
+            var oldHash = map.OnlineHash;
+
+            m.OnlineHash = map.OnlineHash = onlineMap.SHA256Hash;
+            m.Rating = map.Rating = (float)onlineMap.Rating;
+
+            if (map.OnlineHash != oldHash)
+                map.OnlineHashUpdated?.Invoke();
 
             // I would like to know why I didn't put "last update" on the map but on the mapset
             // m.LastOnlineUpdate = map.LastOnlineUpdate = onlineMap.LastUpdate;
@@ -382,13 +440,13 @@ public partial class ScoreList : GridContainer
 
     private void downloadScore(RealmMap map, APIScore score)
     {
-        if (realm.Run(r => r.All<RealmScore>().Any(s => s.OnlineID == score.Id)))
+        if (realm.Run(r => r.All<RealmScore>().Any(s => s.OnlineID == score.ID)))
         {
             notifications.SendSmallText("You already have this score!");
             return;
         }
 
-        var realmScore = realm.RunWrite(r => r.Add(RealmScore.FromScoreInfo(map, score.ToScoreInfo(), score.Id))).Detach();
+        var realmScore = scoreManager.Add(map.ID, score.ToScoreInfo(), score.ID);
 
         var notification = new TaskNotificationData
         {
@@ -405,7 +463,7 @@ public partial class ScoreList : GridContainer
         {
             try
             {
-                var req = new WebRequest($"{fluxel.Endpoint.AssetUrl}/replay/{score.Id}.frp");
+                var req = new WebRequest($"{api.Endpoint.AssetUrl}/replay/{score.ID}.frp");
                 req.AllowInsecureRequests = true;
                 req.Perform();
 
@@ -420,7 +478,7 @@ public partial class ScoreList : GridContainer
             }
             catch (Exception e)
             {
-                Logger.Log($"Failed to download replay for score {score.Id}: {e.Message}", LoggingTarget.Network, LogLevel.Error);
+                Logger.Log($"Failed to download replay for score {score.ID}: {e.Message}", LoggingTarget.Network, LogLevel.Error);
                 notification.State = LoadingState.Failed;
             }
         });
@@ -429,7 +487,7 @@ public partial class ScoreList : GridContainer
     private void addScore(ScoreListEntry entry, int index = -1)
     {
         entry.Place = index;
-        entry.Y = scrollContainer.ScrollContent.Children.Count > 0 ? scrollContainer.ScrollContent.Children[^1].Y + scrollContainer.ScrollContent.Children[^1].Height + 5 : 0;
+        entry.Y = scrollContainer.ScrollContent.Children.Count > 0 ? scrollContainer.ScrollContent.Children[^1].Y + scrollContainer.ScrollContent.Children[^1].Height + 6 : 0;
         scrollContainer.ScrollContent.Add(entry);
     }
 
@@ -492,9 +550,18 @@ public partial class ScoreList : GridContainer
                         RelativeSizeAxes = Axes.Both,
                         Alpha = 0
                     },
-                    new FluXisSpriteText
+                    new TruncatingText
                     {
-                        Text = Type.ToString(),
+                        MaxWidth = 80,
+                        Text = Type switch
+                        {
+                            ScoreListType.Local => LocalizationStrings.SongSelect.LeaderboardLocal,
+                            ScoreListType.Global => LocalizationStrings.SongSelect.LeaderboardGlobal,
+                            ScoreListType.Country => LocalizationStrings.SongSelect.LeaderboardCountry,
+                            ScoreListType.Friends => LocalizationStrings.SongSelect.LeaderboardFriends,
+                            ScoreListType.Club => LocalizationStrings.SongSelect.LeaderboardClub,
+                            _ => "???"
+                        },
                         FontSize = 18,
                         Shear = new Vector2(-.1f, 0),
                         Anchor = Anchor.Centre,

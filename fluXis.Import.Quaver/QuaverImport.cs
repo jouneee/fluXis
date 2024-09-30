@@ -33,6 +33,9 @@ public class QuaverImport : MapImporter
 
     public override void Import(string path)
     {
+        if (!File.Exists(path))
+            return;
+
         var notification = CreateNotification();
 
         try
@@ -162,10 +165,7 @@ public class QuaverImport : MapImporter
                         BPMMax = bpm,
                         NoteCount = noteCount,
                         LongNoteCount = longNoteCount,
-                        NotesPerSecond = (noteCount + longNoteCount) / (songLength / 1000),
-                        HasScrollVelocity = false,
-                        HasLaneSwitch = false,
-                        HasFlash = false
+                        NotesPerSecond = (noteCount + longNoteCount) / (songLength / 1000)
                     },
                     KeyCount = mode == 1 ? 4 : 7,
                     Rating = 0
@@ -186,7 +186,6 @@ public class QuaverImport : MapImporter
                     FolderPath = Path.Combine(songsPath, directoryName),
                     OnlineID = 0,
                     Cover = "",
-                    Managed = true,
                     Resources = resources
                 };
 

@@ -9,8 +9,12 @@ using fluXis.Game.Graphics.UserInterface;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Map;
 using fluXis.Game.Map.Drawables;
+using fluXis.Game.Mods;
+using fluXis.Game.Scoring;
+using fluXis.Game.Screens.Select.Mods;
 using fluXis.Game.Utils;
 using osu.Framework.Allocation;
+using osu.Framework.Audio.Sample;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
@@ -26,6 +30,9 @@ public partial class SelectMapInfoHeader : CompositeDrawable
     [Resolved]
     private MapStore maps { get; set; }
 
+    [Resolved]
+    private ModSelector mods { get; set; }
+
     private SpriteStack<MapBackground> backgrounds;
     private SectionedGradient gradient;
     private SpriteStack<MapCover> covers;
@@ -40,8 +47,8 @@ public partial class SelectMapInfoHeader : CompositeDrawable
     private StatDisplay notesPerSecond;
     private StatDisplay longNotePercentage;
 
-    /*private StatDisplay accuracy;
-    private StatDisplay health;*/
+    private StatDisplay accuracy;
+    private StatDisplay health;
 
     [BackgroundDependencyLoader]
     private void load()
@@ -179,11 +186,11 @@ public partial class SelectMapInfoHeader : CompositeDrawable
                         notesPerSecond = new StatDisplay("NPS", v => v.ToStringInvariant("0.00")),
                         longNotePercentage = new StatDisplay("LN%", v => v.ToStringInvariant("0.00") + "%")
                     }),
-                    /*new StatsRow(new[]
+                    new StatsRow(new[]
                     {
                         accuracy = new StatDisplay("Accuracy", v => v.ToStringInvariant("0.0")),
                         health = new StatDisplay("Health", v => v.ToStringInvariant("0.0"))
-                    })*/
+                    })
                 }
             }
         };
@@ -194,6 +201,8 @@ public partial class SelectMapInfoHeader : CompositeDrawable
         base.LoadComplete();
 
         maps.MapBindable.BindValueChanged(mapChanged, true);
+        mods.SelectedMods.BindCollectionChanged((_, _) => updateDifficultyValues(maps.MapBindable.Value, mods.SelectedMods));
+        mods.RateMod.RateBindable.BindValueChanged(rateChanged, true);
     }
 
     protected override void Dispose(bool isDisposing)
@@ -201,6 +210,15 @@ public partial class SelectMapInfoHeader : CompositeDrawable
         base.Dispose(isDisposing);
 
         maps.MapBindable.ValueChanged -= mapChanged;
+        mods.RateMod.RateBindable.ValueChanged -= rateChanged;
+    }
+
+    private void rateChanged(ValueChangedEvent<float> e)
+    {
+        if (maps.MapBindable.Value == null)
+            return;
+
+        updateValues(maps.MapBindable.Value, e.NewValue);
     }
 
     private void mapChanged(ValueChangedEvent<RealmMap> e)
@@ -221,21 +239,42 @@ public partial class SelectMapInfoHeader : CompositeDrawable
         difficultyText.Text = map.Difficulty;
         mapper.Text = $"mapped by {map.Metadata.Mapper}";
 
-        bpm.SetValue(map.Filters.BPMMin, map.Filters.BPMMax);
-        length.SetValue(map.Filters.Length);
-        notesPerSecond.SetValue(map.Filters.NotesPerSecond);
+        updateValues(map, mods.RateMod.RateBindable.Value);
+
         longNotePercentage.SetValue(map.Filters.LongNotePercentage * 100);
         longNotePercentage.TooltipText = $"{map.Filters.NoteCount} / {map.Filters.LongNoteCount}";
-        /*accuracy.SetValue(map.Accuracy);
-        health.SetValue(map.Health);*/
+
+        updateDifficultyValues(map, mods.SelectedMods);
 
         var background = new MapBackground(map);
-        backgrounds.Add(background, 400);
-        background.FadeInFromZero(400, Easing.OutQuint);
+        backgrounds.Add(background);
+        background.Show();
 
         var cover = new MapCover(map.MapSet);
-        covers.Add(cover, 400);
-        cover.FadeInFromZero(400, Easing.OutQuint);
+        covers.Add(cover);
+        cover.Show();
+    }
+
+    private void updateDifficultyValues(RealmMap map, IList<IMod> list)
+    {
+        var multiplier = list.Any(m => m is HardMod) ? 1.5f : 1;
+
+        var acc = map.AccuracyDifficulty * multiplier;
+        var hp = (map.HealthDifficulty == 0 ? 8 : map.HealthDifficulty) * multiplier;
+
+        accuracy.SetValue(acc);
+        health.SetValue(hp);
+
+        var windows = new HitWindows(acc, 1);
+        var timingsStr = windows.GetTimings().Aggregate("", (current, timing) => current + $"{timing.Judgement}: {timing.Milliseconds.ToStringInvariant("0.#")}ms\n");
+        accuracy.TooltipText = timingsStr.Trim();
+    }
+
+    private void updateValues(RealmMap map, float rate)
+    {
+        bpm.SetValue(map.Filters.BPMMin * rate, map.Filters.BPMMax * rate);
+        length.SetValue(map.Filters.Length / rate);
+        notesPerSecond.SetValue(map.Filters.NotesPerSecond * rate);
     }
 
     private partial class StatsRow : GridContainer
@@ -261,9 +300,19 @@ public partial class SelectMapInfoHeader : CompositeDrawable
         private float min = 0;
         private float max = 0;
 
+        private Sample metronomeSample;
+        private Sample metronomeEndSample;
+
         public BpmDisplay()
             : base("BPM", _ => "")
         {
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(ISampleStore samples)
+        {
+            metronomeSample = samples.Get("UI/metronome");
+            metronomeEndSample = samples.Get("UI/metronome-end");
         }
 
         protected override void LoadComplete()
@@ -284,10 +333,23 @@ public partial class SelectMapInfoHeader : CompositeDrawable
         private void onBeat(int beat)
         {
             ValueText.FadeIn().FadeTo(min_alpha, beatSync.BeatTime);
+
+            if (!IsHovered)
+                return;
+
+            if (beat % 4 == 0)
+                metronomeEndSample?.Play();
+            else
+                metronomeSample?.Play();
         }
 
         public void SetValue(float mi, float ma)
         {
+            if (!float.IsFinite(mi))
+                mi = 0;
+            if (!float.IsFinite(ma))
+                ma = 0;
+
             this.TransformTo(nameof(min), mi, 400, Easing.OutQuint);
             this.TransformTo(nameof(max), ma, 400, Easing.OutQuint);
         }
@@ -360,6 +422,9 @@ public partial class SelectMapInfoHeader : CompositeDrawable
 
         public void SetValue(float v)
         {
+            if (!float.IsFinite(v))
+                v = 0;
+
             this.TransformTo(nameof(value), v, 400, Easing.OutQuint);
         }
 

@@ -1,3 +1,4 @@
+using fluXis.Game.Map.Structures.Bases;
 using Newtonsoft.Json;
 
 namespace fluXis.Game.Map.Structures;
@@ -5,10 +6,10 @@ namespace fluXis.Game.Map.Structures;
 public class ScrollVelocity : ITimedObject
 {
     [JsonProperty("time")]
-    public float Time { get; set; }
+    public double Time { get; set; }
 
     [JsonProperty("multiplier")]
-    public float Multiplier { get; set; }
+    public double Multiplier { get; set; }
 
     public ScrollVelocity Copy()
     {

@@ -1,9 +1,11 @@
 using System;
+using fluXis.Game.Configuration;
 using fluXis.Game.Overlay.Mouse;
 using fluXis.Game.Skinning;
 using JetBrains.Annotations;
 using osu.Framework.Allocation;
 using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Utils;
 
@@ -30,16 +32,23 @@ public partial class UISamples : Component
     private Sample dropdownClose;
     private Sample overlayOpen;
     private Sample overlayClose;
+    private Sample panelOpen;
+    private Sample panelDangerOpen;
+    private Sample panelClose;
+    private Sample panelDangerClose;
+
+    private Bindable<double> panStrength;
 
     private const float pitch_variation = 0.02f;
-    private const float pan_strength = 0.75f;
     private const int debounce_time = 50;
 
     private double lastHoverTime;
 
     [BackgroundDependencyLoader]
-    private void load(ISampleStore samples)
+    private void load(ISampleStore samples, FluXisConfig config)
     {
+        panStrength = config.GetBindable<double>(FluXisSetting.UIPanning);
+
         back = skinManager?.GetUISample(SampleType.Back);
         select = skinManager?.GetUISample(SampleType.Select);
         hover = skinManager?.GetUISample(SampleType.Hover);
@@ -49,6 +58,10 @@ public partial class UISamples : Component
         dropdownClose = samples.Get("UI/dropdown-close");
         overlayOpen = samples.Get("UI/Overlay/open");
         overlayClose = samples.Get("UI/Overlay/close");
+        panelOpen = samples.Get("UI/panel-open");
+        panelDangerOpen = samples.Get("UI/panel-open-danger");
+        panelClose = samples.Get("UI/panel-close");
+        panelDangerClose = samples.Get("UI/panel-close-danger");
     }
 
     protected override void LoadComplete()
@@ -75,6 +88,10 @@ public partial class UISamples : Component
         dropdownClose?.Dispose();
         overlayOpen?.Dispose();
         overlayClose?.Dispose();
+        panelOpen?.Dispose();
+        panelDangerOpen?.Dispose();
+        panelClose?.Dispose();
+        panelDangerClose?.Dispose();
     }
 
     private void onSkinChanged()
@@ -128,7 +145,10 @@ public partial class UISamples : Component
             overlayOpen?.Play();
     }
 
-    public static void PlayPanned(Sample sample, float pan, bool randomizePitch = false)
+    public void PanelOpen(bool danger = false) => (danger ? panelDangerOpen : panelOpen)?.Play();
+    public void PanelClose(bool danger = false) => (danger ? panelDangerClose : panelClose)?.Play();
+
+    public void PlayPanned(Sample sample, float pan, bool randomizePitch = false)
     {
         if (sample == null)
             return;
@@ -136,7 +156,7 @@ public partial class UISamples : Component
         pan = Math.Clamp(pan, 0, 1);
 
         var channel = sample.GetChannel();
-        channel.Balance.Value = (pan * 2 - 1) * pan_strength;
+        channel.Balance.Value = (pan * 2 - 1) * panStrength.Value;
 
         if (randomizePitch)
             channel.Frequency.Value = 1f - pitch_variation / 2f + RNG.NextDouble(pitch_variation);

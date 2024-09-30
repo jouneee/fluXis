@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using fluXis.Game.Map.Structures.Events;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Logging;
@@ -9,6 +10,8 @@ namespace fluXis.Game.Graphics.Shaders;
 public partial class ShaderStackContainer : CompositeDrawable
 {
     private readonly List<ShaderContainer> shaders = new();
+
+    public IReadOnlyList<ShaderType> ShaderTypes => shaders.DistinctBy(x => x.Type).Select(x => x.Type).ToList();
 
     public ShaderStackContainer()
     {
@@ -38,6 +41,28 @@ public partial class ShaderStackContainer : CompositeDrawable
         return this;
     }
 
+    public IEnumerable<Drawable> RemoveContent()
+    {
+        IEnumerable<Drawable> children;
+
+        if (shaders.Count == 0)
+        {
+            children = InternalChildren;
+            ClearInternal(false);
+        }
+        else
+        {
+            var last = shaders.Last();
+            children = last.Children.ToArray();
+            last.Clear(false);
+        }
+
+        return children;
+    }
+
     public T GetShader<T>() where T : ShaderContainer
         => shaders.FirstOrDefault(s => s.GetType() == typeof(T)) as T;
+
+    public ShaderContainer GetShader(ShaderType type)
+        => shaders.FirstOrDefault(s => s.Type == type);
 }

@@ -1,13 +1,16 @@
+using System.Linq;
 using fluXis.Game.Graphics;
 using fluXis.Game.Graphics.Containers;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Input;
-using fluXis.Game.Online.API.Models.Maps;
 using fluXis.Game.Online.API.Requests.MapSets;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.MapSet.Buttons;
+using fluXis.Game.Overlay.MapSet.UI.Difficulties;
+using fluXis.Shared.Components.Maps;
 using osu.Framework.Allocation;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Shapes;
@@ -20,7 +23,7 @@ namespace fluXis.Game.Overlay.MapSet;
 public partial class MapSetOverlay : OverlayContainer, IKeyBindingHandler<FluXisGlobalKeybind>
 {
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     private APIMapSet set;
     private Container content;
@@ -53,7 +56,7 @@ public partial class MapSetOverlay : OverlayContainer, IKeyBindingHandler<FluXis
             },
             new Container
             {
-                Width = 1360,
+                Width = 1320,
                 RelativeSizeAxes = Axes.Y,
                 Anchor = Anchor.Centre,
                 Origin = Anchor.Centre,
@@ -100,18 +103,21 @@ public partial class MapSetOverlay : OverlayContainer, IKeyBindingHandler<FluXis
     private async void fetch(long id)
     {
         var request = new MapSetRequest(id);
-        await request.PerformAsync(fluxel);
+        await api.PerformRequestAsync(request);
 
-        // we might wanna show a message if the request fails
+        // we might want to show a message if the request fails
         if (!request.IsSuccessful)
             return;
 
-        set = request.Response.Data;
+        set = request.Response!.Data;
         Schedule(() => displayData(set));
     }
 
     private void displayData(APIMapSet set)
     {
+        set.Maps.Sort((a, b) => a.NotesPerSecond.CompareTo(b.NotesPerSecond));
+        var bindableMap = new Bindable<APIMap>(set.Maps.First());
+
         flow.Clear();
         flow.Children = new Drawable[]
         {
@@ -131,13 +137,14 @@ public partial class MapSetOverlay : OverlayContainer, IKeyBindingHandler<FluXis
                         AutoSizeAxes = Axes.Y,
                         Children = new Drawable[]
                         {
-                            new FluXisSpriteText
+                            new FillFlowContainer
                             {
-                                Text = "diff chips here",
-                                WebFontSize = 16,
-                                Shadow = true,
+                                AutoSizeAxes = Axes.Both,
+                                Direction = FillDirection.Horizontal,
                                 Anchor = Anchor.CentreLeft,
-                                Origin = Anchor.CentreLeft
+                                Origin = Anchor.CentreLeft,
+                                Spacing = new Vector2(12),
+                                ChildrenEnumerable = set.Maps.Select(m => new DifficultyChip(set, m, bindableMap))
                             },
                             new FillFlowContainer
                             {
@@ -145,7 +152,7 @@ public partial class MapSetOverlay : OverlayContainer, IKeyBindingHandler<FluXis
                                 Direction = FillDirection.Horizontal,
                                 Anchor = Anchor.CentreRight,
                                 Origin = Anchor.CentreRight,
-                                Spacing = new Vector2(10),
+                                Spacing = new Vector2(12),
                                 Children = new Drawable[]
                                 {
                                     new MapSetButton(FontAwesome6.Solid.Star, () => { }),

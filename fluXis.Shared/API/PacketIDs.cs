@@ -9,6 +9,8 @@ public static class PacketIDs
 
     public const string ACHIEVEMENT = "achievement";
     public const string SERVER_MESSAGE = "server/message";
+    public const string MAINTENANCE = "server/maintenance";
+    public const string ACTIVITY = "user/activity";
 
     public const string FRIEND_ONLINE = "friend/online";
     public const string FRIEND_OFFLINE = "friend/offline";
@@ -16,6 +18,8 @@ public static class PacketIDs
     public const string CHAT_MESSAGE = "chat/message";
     public const string CHAT_HISTORY = "chat/history";
     public const string CHAT_DELETE = "chat/delete";
+    public const string CHAT_JOIN = "chat/join";
+    public const string CHAT_LEAVE = "chat/leave";
 
     public const string MULTIPLAYER_CREATE = "multi/create";
     public const string MULTIPLAYER_JOIN = "multi/join";

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using fluXis.Game.Configuration;
 using fluXis.Game.Map;
-using fluXis.Game.Map.Events;
 using fluXis.Game.Map.Structures;
 using fluXis.Game.Mods;
 using fluXis.Game.Scoring.Enums;
@@ -16,6 +15,7 @@ using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Utils;
 
 namespace fluXis.Game.Screens.Gameplay.Ruleset.HitObjects;
 
@@ -30,6 +30,9 @@ public partial class HitObjectManager : Container<DrawableHitObject>
     [Resolved]
     private Playfield playfield { get; set; }
 
+    [Resolved]
+    private LaneSwitchManager laneSwitchManager { get; set; }
+
     private GameplayInput input => screen.Input;
 
     private Bindable<bool> useSnapColors;
@@ -38,17 +41,18 @@ public partial class HitObjectManager : Container<DrawableHitObject>
     private Bindable<float> scrollSpeed;
     public float ScrollSpeed => scrollSpeed.Value * (scrollSpeed.Value / (scrollSpeed.Value * screen.Rate));
 
+    public float DirectScrollMultiplier { get; set; } = 1;
+    public double VisualTimeOffset { get; set; } = 0;
+
     private Bindable<bool> hitsounds;
 
     public MapInfo Map => playfield.Map;
     public int KeyCount => playfield.RealmMap.KeyCount;
-    public List<HitObject> PastHitObjects { get; } = new();
+    public Stack<HitObject> PastHitObjects { get; } = new();
     public List<HitObject> FutureHitObjects { get; } = new();
     public List<DrawableHitObject> HitObjects { get; } = new();
 
     public double CurrentTime { get; private set; }
-    public int CurrentKeyCount { get; private set; }
-    public LaneSwitchEvent CurrentLaneSwitchEvent { get; private set; }
 
     public bool Seeking { get; private set; }
 
@@ -64,7 +68,9 @@ public partial class HitObjectManager : Container<DrawableHitObject>
 
     private JudgementProcessor judgementProcessor => screen.JudgementProcessor;
 
-    private List<float> scrollVelocityMarks { get; } = new();
+    private List<double> scrollVelocityMarks { get; } = new();
+
+    private static int[] snaps { get; } = { 48, 24, 16, 12, 8, 6, 4, 3 };
     private Dictionary<int, int> snapIndices { get; } = new();
 
     public Action OnFinished { get; set; }
@@ -84,6 +90,8 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         }
     }
 
+    private const float minimum_loaded_hit_objects = 10;
+
     [BackgroundDependencyLoader]
     private void load(FluXisConfig config)
     {
@@ -94,7 +102,6 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         scrollSpeed = config.GetBindable<float>(FluXisSetting.ScrollSpeed);
         useSnapColors = config.GetBindable<bool>(FluXisSetting.SnapColoring);
         hitsounds = config.GetBindable<bool>(FluXisSetting.Hitsounding);
-        screen.OnSeek += onSeek;
     }
 
     protected override void LoadComplete()
@@ -113,67 +120,6 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         };
     }
 
-    private void onSeek(double prevTime, double newTime)
-    {
-        newTime = Math.Max(newTime, 0);
-
-        /*Seeking = true;
-        (Clock as GameplayClock)?.Seek(newTime);
-
-        if (newTime < prevTime)
-        {
-            var hitObjects = PastHitObjects.Where(h => h.Time >= newTime).ToList();
-
-            foreach (var hitObject in hitObjects)
-            {
-                if (hitObject.LongNote && hitObject.EndTime >= newTime && hitObject.HoldEndResult != null)
-                {
-                    var endResult = hitObject.HoldEndResult;
-                    judgementProcessor.RevertResult(endResult);
-                    hitObject.HoldEndResult = null;
-                }
-
-                if (hitObject.Result == null) continue;
-
-                var result = hitObject.Result;
-                judgementProcessor.RevertResult(result);
-                hitObject.Result = null;
-
-                var hit = new OldDrawableHitObject(this, hitObject);
-                HitObjects.Add(hit);
-                AddInternal(hit);
-            }
-
-            PastHitObjects.RemoveAll(h => h.Time >= newTime);
-            FutureHitObjects.RemoveAll(h => h.Time <= newTime);
-            FutureHitObjects.Sort((a, b) => a.Time.CompareTo(b.Time));
-        }
-        else
-        {
-            // all future hitobjects behind the new time
-            var hitObjects = FutureHitObjects.Where(h => h.Time <= newTime).ToList();
-
-            // remove all hitobjects behind the new time
-            foreach (var info in hitObjects)
-            {
-                var hitResult = new HitResult(info.Time, 0, Judgement.Flawless);
-                judgementProcessor.AddResult(hitResult);
-                info.Result = hitResult;
-
-                if (info.LongNote)
-                {
-                    var endHitResult = new HitResult(info.EndTime, 0, Judgement.Flawless);
-                    judgementProcessor.AddResult(endHitResult);
-                    info.HoldEndResult = endHitResult;
-                }
-            }
-
-            var toPast = FutureHitObjects.Where(h => h.Time <= newTime);
-            PastHitObjects.AddRange(toPast);
-            FutureHitObjects.RemoveAll(h => h.Time <= newTime);
-        }*/
-    }
-
     protected override void Update()
     {
         updateTime();
@@ -184,7 +130,7 @@ public partial class HitObjectManager : Container<DrawableHitObject>
             OnFinished?.Invoke();
         }
 
-        while (FutureHitObjects is { Count: > 0 } && ShouldDisplay(FutureHitObjects[0].Time))
+        while (FutureHitObjects is { Count: > 0 } && (ShouldDisplay(FutureHitObjects[0].Time) || HitObjects.Count < minimum_loaded_hit_objects))
         {
             var hit = createHitObject(FutureHitObjects[0]);
             HitObjects.Add(hit);
@@ -193,7 +139,7 @@ public partial class HitObjectManager : Container<DrawableHitObject>
             FutureHitObjects.RemoveAt(0);
         }
 
-        while (HitObjects.Count > 0 && !ShouldDisplay(HitObjects.Last().Data.Time))
+        while (HitObjects.Count > 0 && !ShouldDisplay(HitObjects.Last().Data.Time) && HitObjects.Count > minimum_loaded_hit_objects)
         {
             var hit = HitObjects.Last();
             removeHitObject(hit, true);
@@ -202,23 +148,39 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         foreach (var hitObject in HitObjects.Where(h => h.CanBeRemoved).ToList())
             removeHitObject(hitObject);
 
-        foreach (var laneSwitchEvent in screen.MapEvents.LaneSwitchEvents)
+        while (PastHitObjects.Count > 0)
         {
-            if (laneSwitchEvent.Time <= Clock.CurrentTime)
-            {
-                CurrentKeyCount = laneSwitchEvent.Count;
-                CurrentLaneSwitchEvent = laneSwitchEvent;
-            }
-        }
+            var result = PastHitObjects.Peek().Result;
 
-        base.Update();
+            if (result is null || Clock.CurrentTime >= result.Time)
+                break;
+
+            revertHitObject(PastHitObjects.Pop());
+        }
     }
 
-    public float HitPosition => DrawHeight - skinManager.SkinJson.GetKeymode(CurrentKeyCount).HitPosition;
+    public float HitPosition => DrawHeight - laneSwitchManager.HitPosition;
 
-    public bool ShouldDisplay(float time) => ScrollVelocityPositionFromTime(time) <= ScrollVelocityPositionFromTime(Clock.CurrentTime) + DrawHeight * screen.Rate;
-    public float PositionAtTime(double time) => PositionAtTime((float)time);
-    public float PositionAtTime(float time) => HitPosition - .5f * ((time - (float)CurrentTime) * ScrollSpeed);
+    public bool ShouldDisplay(double time)
+    {
+        var svTime = ScrollVelocityPositionFromTime(time);
+        var y = PositionAtTime(svTime);
+        return y >= 0;
+    }
+
+    public float PositionAtTime(double time, Easing ease = Easing.None)
+    {
+        var pos = HitPosition;
+        var current = CurrentTime + VisualTimeOffset;
+        var y = (float)(pos - .5f * ((time - (float)current) * (ScrollSpeed * DirectScrollMultiplier)));
+
+        if (ease <= Easing.None || y < 0 || y > pos)
+            return y;
+
+        var progress = y / pos;
+        y = Interpolation.ValueAt(progress, 0, pos, 0, 1, ease);
+        return float.IsFinite(y) ? y : 0;
+    }
 
     public float PositionAtLane(int lane)
     {
@@ -236,34 +198,56 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         return x;
     }
 
-    public float WidthOfLane(int lane)
+    public Easing EasingAtTime(double time)
     {
-        var receptors = playfield.Receptors;
+        var events = screen.MapEvents.HitObjectEaseEvents;
 
-        if (lane > receptors.Count)
-            return skinManager.SkinJson.GetKeymode(KeyCount).ColumnWidth;
+        if (events.Count == 0)
+            return Easing.None;
 
-        return receptors[lane - 1].Width;
+        var first = events.LastOrDefault(e => e.Time <= time);
+        return first?.Easing ?? Easing.None;
     }
+
+    public float WidthOfLane(int lane) => laneSwitchManager.WidthFor(lane);
 
     public bool IsFirstInColumn(DrawableHitObject hitObject) => HitObjects.FirstOrDefault(h => h.Data.Lane == hitObject.Data.Lane && h.Data.Time < hitObject.Data.Time) == null;
 
     private DrawableHitObject createHitObject(HitObject hitObject)
     {
         var drawable = getDrawableFor(hitObject);
-        drawable.Keybind = screen.Input.Keys[hitObject.Lane - 1];
+        var idx = hitObject.Lane - 1;
+
+        if (screen.Input.Keys.Count > idx)
+            drawable.Keybind = screen.Input.Keys[idx];
+
         drawable.OnHit += hit;
 
         drawable.OnLoadComplete += _ =>
         {
             for (var i = 0; i < screen.Input.Pressed.Length; i++)
             {
+                if (!screen.Input.Pressed[i])
+                    continue;
+
                 var bind = screen.Input.Keys[i];
                 drawable.OnPressed(bind);
             }
         };
 
         return drawable;
+    }
+
+    private void revertHitObject(HitObject hit)
+    {
+        if (hit.HoldEndResult is not null)
+            judgementProcessor.RevertResult(hit.HoldEndResult);
+
+        judgementProcessor.RevertResult(hit.Result);
+
+        var draw = createHitObject(hit);
+        HitObjects.Insert(0, draw);
+        AddInternal(draw);
     }
 
     private void removeHitObject(DrawableHitObject hitObject, bool addToFuture = false)
@@ -278,7 +262,7 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         if (addToFuture)
             FutureHitObjects.Insert(0, hitObject.Data);
         else
-            PastHitObjects.Add(hitObject.Data);
+            PastHitObjects.Push(hitObject.Data);
 
         RemoveInternal(hitObject, true);
     }
@@ -310,7 +294,7 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         CurrentTime = ScrollVelocityPositionFromTime(Clock.CurrentTime, svIndex);
     }
 
-    private void hit(DrawableHitObject hitObject, float difference)
+    private void hit(DrawableHitObject hitObject, double difference)
     {
         // since judged is only set after hitting the tail this works
         var isHoldEnd = hitObject is DrawableLongNote { Judged: true };
@@ -321,7 +305,7 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         if (screen.HealthProcessor.Failed)
             return;
 
-        var result = new HitResult(hitObject.Data.Time, difference, judgement);
+        var result = new HitResult(Time.Current, difference, judgement);
         judgementProcessor.AddResult(result);
 
         if (isHoldEnd)
@@ -341,29 +325,40 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         channel?.Play();
     }
 
+    protected override int Compare(Drawable x, Drawable y)
+    {
+        var a = (DrawableHitObject)x;
+        var b = (DrawableHitObject)y;
+
+        var result = a.Data.Time.CompareTo(b.Data.Time);
+
+        if (result != 0)
+            return result;
+
+        result = a.Data.Lane.CompareTo(b.Data.Lane);
+
+        if (result != 0)
+            return result;
+
+        return a.Data.GetHashCode().CompareTo(b.Data.GetHashCode());
+    }
+
     private void loadMap()
     {
-        CurrentKeyCount = Map.InitialKeyCount;
         initScrollVelocityMarks();
         initSnapIndices();
 
-        foreach (var hit in Map.HitObjects)
-        {
-            if (screen.Mods.Any(m => m is NoLnMod))
-                hit.HoldTime = 0;
-
-            FutureHitObjects.Add(hit);
-        }
+        Map.HitObjects.ForEach(FutureHitObjects.Add);
     }
 
     private void initScrollVelocityMarks()
     {
-        if (Map.ScrollVelocities == null || Map.ScrollVelocities.Count == 0 || screen.Mods.Any(m => m is NoSvMod))
+        if (Map.ScrollVelocities == null || Map.ScrollVelocities.Count == 0)
             return;
 
         ScrollVelocity first = Map.ScrollVelocities[0];
 
-        float time = first.Time;
+        var time = first.Time;
         scrollVelocityMarks.Add(time);
 
         for (var i = 1; i < Map.ScrollVelocities.Count; i++)
@@ -381,35 +376,43 @@ public partial class HitObjectManager : Container<DrawableHitObject>
         // shouldn't happen but just in case
         if (Map.TimingPoints == null || Map.TimingPoints.Count == 0) return;
 
-        for (var i = 0; i < Map.TimingPoints.Count; i++)
+        foreach (var hitObject in Map.HitObjects)
         {
-            TimingPoint timingPoint = Map.TimingPoints[i];
-            double time = timingPoint.Time;
-            float target = i + 1 < Map.TimingPoints.Count ? Map.TimingPoints[i + 1].Time : Map.EndTime;
-            float increment = timingPoint.MsPerBeat;
+            var time = (int)hitObject.Time;
+            var endTime = (int)hitObject.EndTime;
 
-            while (time < target)
+            if (!snapIndices.ContainsKey(time))
+                snapIndices.Add(time, getIndex(time));
+            if (!snapIndices.ContainsKey(endTime))
+                snapIndices.Add(endTime, getIndex(endTime));
+        }
+
+        int getIndex(int time)
+        {
+            var tp = Map.GetTimingPoint(time);
+            var diff = time - tp.Time;
+            var idx = Math.Round(snaps[0] * diff / tp.MsPerBeat, MidpointRounding.AwayFromZero);
+
+            for (var i = 0; i < snaps.Length; i++)
             {
-                for (int j = 0; j < 16; j++)
-                {
-                    var add = increment / 16 * j;
-                    var snap = time + add;
-
-                    snapIndices.TryAdd((int)snap, j);
-                }
-
-                time += increment;
+                if (idx % snaps[i] == 0)
+                    return i;
             }
+
+            return snaps.Length - 1;
         }
     }
 
-    public int GetSnapIndex(int time)
+    public int GetSnapIndex(double time)
     {
-        if (snapIndices.TryGetValue(time, out int i)) return i;
+        if (snapIndices.TryGetValue((int)time, out int i))
+            return i;
+
+        var closest = snapIndices.Keys.MinBy(k => Math.Abs(k - time));
 
         // allow a 10ms margin of error for snapping
-        var closest = snapIndices.Keys.MinBy(k => Math.Abs(k - time));
-        if (Math.Abs(closest - time) <= 10 && snapIndices.TryGetValue(closest, out i)) return i;
+        if (Math.Abs(closest - time) <= 10 && snapIndices.TryGetValue(closest, out i))
+            return i;
 
         // still nothing...
         return -1;
@@ -417,7 +420,7 @@ public partial class HitObjectManager : Container<DrawableHitObject>
 
     public double ScrollVelocityPositionFromTime(double time, int index = -1)
     {
-        if (Map.ScrollVelocities == null || Map.ScrollVelocities.Count == 0 || screen.Mods.Any(m => m is NoSvMod))
+        if (Map.ScrollVelocities == null || Map.ScrollVelocities.Count == 0)
             return time;
 
         if (index == -1)

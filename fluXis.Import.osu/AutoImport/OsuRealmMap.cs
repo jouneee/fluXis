@@ -9,7 +9,17 @@ public class OsuRealmMap : RealmMap
     public override MapInfo GetMapInfo()
     {
         var path = MapSet.GetPathForFile(FileName);
+
+        if (!File.Exists(path))
+            return null;
+
         string osu = File.ReadAllText(path);
-        return OsuImport.ParseOsuMap(osu).ToMapInfo();
+        var info = OsuImport.ParseOsuMap(osu).ToMapInfo();
+
+        if (info is null)
+            return null;
+
+        info.Map = this;
+        return info;
     }
 }

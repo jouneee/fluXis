@@ -14,30 +14,30 @@ public partial class ModIcon : Container
 {
     public IMod Mod { get; set; }
 
+    private FillFlowContainer flow;
     private SpriteIcon icon;
+
+    public float IconWidthRate { get; set; } = 80;
+    public float FlowSpacing { get; set; } = 4;
+    public float IconSize { get; set; } = 24;
+
+    public ModIcon()
+    {
+        Width = 80;
+        Height = 40;
+        CornerRadius = 10;
+    }
 
     [BackgroundDependencyLoader]
     private void load()
     {
         if (Mod is null) return;
 
-        Width = 80;
-        Height = 40;
-        CornerRadius = 10;
         Masking = true;
         Shear = new Vector2(0.2f, 0);
         EdgeEffect = FluXisStyles.ShadowSmall;
 
-        var color = Mod.Type switch
-        {
-            ModType.Rate => Colour4.FromHex("#ffdb69"),
-            ModType.DifficultyDecrease => Colour4.FromHex("#b2ff66"),
-            ModType.DifficultyIncrease => Colour4.FromHex("#ff6666"),
-            ModType.Automation => Colour4.FromHex("#66b3ff"),
-            ModType.Misc => Colour4.FromHex("#8866ff"),
-            ModType.Special => Colour4.FromHex("#cccccc"),
-            _ => Colour4.White
-        };
+        var color = FluXisColors.GetModTypeColor(Mod.Type);
 
         Children = new Drawable[]
         {
@@ -46,23 +46,36 @@ public partial class ModIcon : Container
                 RelativeSizeAxes = Axes.Both,
                 Colour = color
             },
-            icon = new SpriteIcon
+            flow = new FillFlowContainer
             {
+                AutoSizeAxes = Axes.Both,
                 Anchor = Anchor.Centre,
                 Origin = Anchor.Centre,
-                Icon = Mod.Icon,
-                Size = new Vector2(24),
-                Colour = FluXisColors.IsBright(color) ? FluXisColors.TextDark : FluXisColors.Text,
-                Shear = new Vector2(-0.2f, 0)
+                Direction = FillDirection.Horizontal,
+                Spacing = new Vector2(FlowSpacing),
+                Children = new Drawable[]
+                {
+                    icon = new SpriteIcon
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Icon = Mod.Icon,
+                        Size = new Vector2(IconSize),
+                        Colour = FluXisColors.IsBright(color) ? FluXisColors.TextDark : FluXisColors.Text,
+                        Shear = new Vector2(-0.2f, 0)
+                    }
+                }
             }
         };
 
         if (Mod is RateMod)
         {
-            Add(new FluXisSpriteText
+            Width = IconWidthRate;
+
+            flow.Add(new FluXisSpriteText
             {
                 Anchor = Anchor.Centre,
-                Origin = Anchor.CentreLeft,
+                Origin = Anchor.Centre,
                 Text = Mod.Acronym,
                 Colour = FluXisColors.IsBright(color) ? FluXisColors.TextDark : FluXisColors.Text,
                 FontSize = 18,
@@ -70,8 +83,6 @@ public partial class ModIcon : Container
             });
 
             icon.Scale = new Vector2(0.8f);
-            icon.Origin = Anchor.CentreRight;
-            icon.X = -5;
         }
     }
 }

@@ -4,12 +4,12 @@ using fluXis.Game.Graphics.UserInterface;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Input;
 using fluXis.Game.Online;
-using fluXis.Game.Online.API.Models.Clubs;
-using fluXis.Game.Online.API.Models.Users;
 using fluXis.Game.Online.API.Requests.Users;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.User.Sections;
 using fluXis.Game.Overlay.User.Sidebar;
+using fluXis.Shared.Components.Clubs;
+using fluXis.Shared.Components.Users;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
@@ -23,7 +23,10 @@ namespace fluXis.Game.Overlay.User;
 public partial class UserProfileOverlay : OverlayContainer, IKeyBindingHandler<FluXisGlobalKeybind>
 {
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
+
+    [Resolved]
+    private UserCache users { get; set; }
 
     private APIUser user;
     private Container content;
@@ -57,7 +60,7 @@ public partial class UserProfileOverlay : OverlayContainer, IKeyBindingHandler<F
             },
             new Container
             {
-                Width = 1360,
+                Width = 1320,
                 RelativeSizeAxes = Axes.Y,
                 Anchor = Anchor.Centre,
                 Origin = Anchor.Centre,
@@ -124,11 +127,11 @@ public partial class UserProfileOverlay : OverlayContainer, IKeyBindingHandler<F
             loading.Show();
         });
 
-        user = await UserCache.GetUserAsync(id);
+        user = await users.UserAsync(id, true);
         if (user == null) return;
 
         var mapsReq = new UserMapsRequest(id);
-        await mapsReq.PerformAsync(fluxel);
+        await api.PerformRequestAsync(mapsReq);
 
         Schedule(() =>
         {
@@ -152,7 +155,7 @@ public partial class UserProfileOverlay : OverlayContainer, IKeyBindingHandler<F
                 Spacing = new Vector2(20),
                 Children = new Drawable[]
                 {
-                    new ProfileStats(user),
+                    new ProfileStats(user.Statistics!),
                     new GridContainer
                     {
                         RelativeSizeAxes = Axes.X,
@@ -179,7 +182,7 @@ public partial class UserProfileOverlay : OverlayContainer, IKeyBindingHandler<F
                                     Spacing = new Vector2(20),
                                     Children = new Drawable[]
                                     {
-                                        new ProfileSidebarClub(user.Club ?? new APIClubShort())
+                                        new ProfileSidebarClub(user.Club ?? new APIClub())
                                         {
                                             Alpha = user.Club?.ID == 0 ? 0 : 1
                                         },

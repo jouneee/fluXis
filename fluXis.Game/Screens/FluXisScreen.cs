@@ -15,6 +15,7 @@ public partial class FluXisScreen : Screen
     public virtual float BackgroundDim => 0.25f;
     public virtual float BackgroundBlur => 0f;
     public virtual bool AllowMusicControl => true;
+    public virtual bool AllowMusicPausing => AllowMusicControl;
     public virtual bool ShowCursor => true;
     public virtual bool ApplyValuesAfterLoad => false;
     public virtual bool AllowExit => true;
@@ -29,6 +30,8 @@ public partial class FluXisScreen : Screen
     public virtual UserActivity InitialActivity => new UserActivity.MenuGeneral();
     public Bindable<UserActivity> Activity { get; }
 
+    public BindableBool AllowOverlays { get; }
+
     [Resolved]
     protected UISamples UISamples { get; private set; }
 
@@ -39,6 +42,7 @@ public partial class FluXisScreen : Screen
         Anchor = Anchor.Centre;
         Origin = Anchor.Centre;
         Activity = new Bindable<UserActivity>(InitialActivity);
+        AllowOverlays = new BindableBool(true);
     }
 
     public override bool OnExiting(ScreenExitEvent e)

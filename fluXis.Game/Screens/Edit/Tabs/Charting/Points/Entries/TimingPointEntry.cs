@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using fluXis.Game.Graphics.Sprites;
+using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Map.Structures;
+using fluXis.Game.Map.Structures.Bases;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.List;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings.Waveform;
@@ -14,7 +16,7 @@ namespace fluXis.Game.Screens.Edit.Tabs.Charting.Points.Entries;
 public partial class TimingPointEntry : PointListEntry
 {
     protected override string Text => "Timing Point";
-    protected override Colour4 Color => Colour4.FromHex("#00FF80");
+    protected override Colour4 Color => FluXisColors.TimingPoint;
 
     private TimingPoint timing => Object as TimingPoint;
 
@@ -23,7 +25,7 @@ public partial class TimingPointEntry : PointListEntry
     {
     }
 
-    protected override ITimedObject CreateClone() => new TimingPoint
+    public override ITimedObject CreateClone() => new TimingPoint
     {
         Time = Object.Time,
         BPM = timing.BPM,
@@ -55,7 +57,7 @@ public partial class TimingPointEntry : PointListEntry
                 DefaultText = timing.BPM.ToStringInvariant("0.00"),
                 OnTextChanged = box =>
                 {
-                    if (float.TryParse(box.Text, CultureInfo.InvariantCulture, out var result))
+                    if (float.TryParse(box.Text, CultureInfo.InvariantCulture, out var result) && result > 0)
                         timing.BPM = result;
                     else
                         box.NotifyError();

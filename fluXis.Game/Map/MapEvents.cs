@@ -1,12 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using fluXis.Game.Map.Events;
+using fluXis.Game.Map.Structures.Bases;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Shared.Utils;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using osu.Framework.Graphics;
-using osu.Framework.Logging;
 using SixLabors.ImageSharp;
 
 namespace fluXis.Game.Map;
@@ -28,11 +27,20 @@ public class MapEvents : IDeepCloneable<MapEvents>
     [JsonProperty("playfieldscale")]
     public List<PlayfieldScaleEvent> PlayfieldScaleEvents { get; private set; } = new();
 
-    [JsonProperty("shake")]
-    public List<ShakeEvent> ShakeEvents { get; private set; } = new();
-
     [JsonProperty("playfieldfade")]
     public List<PlayfieldFadeEvent> PlayfieldFadeEvents { get; private set; } = new();
+
+    [JsonProperty("playfieldrotate")]
+    public List<PlayfieldRotateEvent> PlayfieldRotateEvents { get; private set; } = new();
+
+    [JsonProperty("hitfade")]
+    public List<HitObjectFadeEvent> HitObjectFadeEvents { get; private set; } = new();
+
+    [JsonProperty("hitease")]
+    public List<HitObjectEaseEvent> HitObjectEaseEvents { get; private set; } = new();
+
+    [JsonProperty("shake")]
+    public List<ShakeEvent> ShakeEvents { get; private set; } = new();
 
     [JsonProperty("shader")]
     public List<ShaderEvent> ShaderEvents { get; private set; } = new();
@@ -40,16 +48,31 @@ public class MapEvents : IDeepCloneable<MapEvents>
     [JsonProperty("beatpulse")]
     public List<BeatPulseEvent> BeatPulseEvents { get; private set; } = new();
 
+    [JsonProperty("scroll-multiply")]
+    public List<ScrollMultiplierEvent> ScrollMultiplyEvents { get; private set; } = new();
+
+    [JsonProperty("time-offset")]
+    public List<TimeOffsetEvent> TimeOffsetEvents { get; private set; } = new();
+
+    [JsonProperty("notes")]
+    public List<NoteEvent> NoteEvents { get; private set; } = new();
+
     [JsonIgnore]
     public bool Empty => LaneSwitchEvents.Count == 0
                          && FlashEvents.Count == 0
                          && PulseEvents.Count == 0
                          && PlayfieldMoveEvents.Count == 0
                          && PlayfieldScaleEvents.Count == 0
-                         && ShakeEvents.Count == 0
+                         && PlayfieldRotateEvents.Count == 0
                          && PlayfieldFadeEvents.Count == 0
+                         && HitObjectFadeEvents.Count == 0
+                         && HitObjectEaseEvents.Count == 0
+                         && ShakeEvents.Count == 0
                          && ShaderEvents.Count == 0
-                         && BeatPulseEvents.Count == 0;
+                         && BeatPulseEvents.Count == 0
+                         && ScrollMultiplyEvents.Count == 0
+                         && TimeOffsetEvents.Count == 0
+                         && NoteEvents.Count == 0;
 
     public static T Load<T>(string content)
         where T : MapEvents, new()
@@ -187,14 +210,13 @@ public class MapEvents : IDeepCloneable<MapEvents>
                         continue;
 
                     var dataJson = line[startIdx..(endIdx + 1)];
-                    Logger.Log(dataJson);
-                    var data = dataJson.Deserialize<JObject>();
+                    var data = dataJson.Deserialize<ShaderEvent.ShaderParameters>();
 
                     ShaderEvents.Add(new ShaderEvent
                     {
                         Time = float.Parse(args[0], CultureInfo.InvariantCulture),
                         ShaderName = args[1],
-                        ShaderParams = data
+                        EndParameters = data
                     });
                     break;
             }
@@ -205,26 +227,36 @@ public class MapEvents : IDeepCloneable<MapEvents>
 
     public MapEvents Sort()
     {
-        LaneSwitchEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
-        FlashEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
-        PulseEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
-        PlayfieldMoveEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
-        PlayfieldScaleEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
-        ShakeEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
-        PlayfieldFadeEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
-        ShaderEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
-        BeatPulseEvents.Sort((a, b) => a.Time.CompareTo(b.Time));
+        LaneSwitchEvents.Sort(compare);
+        FlashEvents.Sort(compare);
+        PulseEvents.Sort(compare);
+        PlayfieldMoveEvents.Sort(compare);
+        PlayfieldScaleEvents.Sort(compare);
+        PlayfieldFadeEvents.Sort(compare);
+        HitObjectFadeEvents.Sort(compare);
+        HitObjectEaseEvents.Sort(compare);
+        ShakeEvents.Sort(compare);
+        ShaderEvents.Sort(compare);
+        BeatPulseEvents.Sort(compare);
+        PlayfieldRotateEvents.Sort(compare);
+        ScrollMultiplyEvents.Sort(compare);
+        TimeOffsetEvents.Sort(compare);
+        NoteEvents.Sort(compare);
 
         return this;
+    }
+
+    private static int compare(ITimedObject a, ITimedObject b)
+    {
+        var val = a.Time.CompareTo(b.Time);
+        return val == 0 ? a.GetHashCode().CompareTo(b.GetHashCode()) : val;
     }
 
     public string Save() => Sort().Serialize();
 
     public MapEvents DeepClone()
     {
-        var clone = MemberwiseClone() as MapEvents;
-
-        if (clone == null)
+        if (MemberwiseClone() is not MapEvents clone)
             throw new InvalidOperationException("Failed to clone MapEvents");
 
         clone.LaneSwitchEvents = new List<LaneSwitchEvent>(LaneSwitchEvents);
@@ -232,10 +264,16 @@ public class MapEvents : IDeepCloneable<MapEvents>
         clone.PulseEvents = new List<PulseEvent>(PulseEvents);
         clone.PlayfieldMoveEvents = new List<PlayfieldMoveEvent>(PlayfieldMoveEvents);
         clone.PlayfieldScaleEvents = new List<PlayfieldScaleEvent>(PlayfieldScaleEvents);
-        clone.ShakeEvents = new List<ShakeEvent>(ShakeEvents);
+        clone.PlayfieldRotateEvents = new List<PlayfieldRotateEvent>(PlayfieldRotateEvents);
         clone.PlayfieldFadeEvents = new List<PlayfieldFadeEvent>(PlayfieldFadeEvents);
+        clone.HitObjectFadeEvents = new List<HitObjectFadeEvent>(HitObjectFadeEvents);
+        clone.HitObjectEaseEvents = new List<HitObjectEaseEvent>(HitObjectEaseEvents);
+        clone.ShakeEvents = new List<ShakeEvent>(ShakeEvents);
         clone.ShaderEvents = new List<ShaderEvent>(ShaderEvents);
         clone.BeatPulseEvents = new List<BeatPulseEvent>(BeatPulseEvents);
+        clone.ScrollMultiplyEvents = new List<ScrollMultiplierEvent>(ScrollMultiplyEvents);
+        clone.TimeOffsetEvents = new List<TimeOffsetEvent>(TimeOffsetEvents);
+        clone.NoteEvents = new List<NoteEvent>(NoteEvents);
         return clone;
     }
 }

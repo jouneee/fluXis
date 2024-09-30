@@ -1,3 +1,4 @@
+using fluXis.Game.Mods;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Colour;
 using osuTK;
@@ -21,6 +22,7 @@ public static class FluXisColors
     public static Colour4 Background6 => GetThemeColor(.1f, .35f);
     public static Colour4 Foreground => GetThemeColor(.1f, .6f);
     public static Colour4 Highlight => GetThemeColor(1f, .7f);
+    public static Colour4 Link => GetThemeColor(1f, .8f);
 
     public static Colour4 GetThemeColor(float saturation, float lightness) => Colour4.FromHSL(240 / 360f, saturation, lightness);
 
@@ -34,17 +36,28 @@ public static class FluXisColors
     public static Colour4 ButtonGreen => Colour4.FromHSL(120 / 360f, .5f, .3f);
     public static Colour4 Green => Colour4.FromHSL(120 / 360f, 1f, .67f);
 
+    public static Colour4 TimingPoint => Colour4.FromHex("#00FF80");
+    public static Colour4 ScrollVelocity => Colour4.FromHex("#00D4FF");
+    public static Colour4 PreviewPoint => Colour4.FromHex("FDD27F");
+    public static Colour4 LaneSwitch => Colour4.FromHex("#FF6666");
+    public static Colour4 Flash => Colour4.FromHex("#FFCC66");
+    public static Colour4 Shake => Colour4.FromHex("#01FEFE");
+    public static Colour4 PlayfieldMove => Colour4.FromHex("#01FE55");
+    public static Colour4 PlayfieldScale => Colour4.FromHex("#D279C4");
+    public static Colour4 PlayfieldRotate => Colour4.FromHex("#8AF7A2");
+    public static Colour4 PlayfieldFade => Colour4.FromHex("#0180FE");
+    public static Colour4 HitObjectFade => Colour4.FromHex("#8AF3F7");
+    public static Colour4 HitObjectEase => Colour4.FromHex("#5B92FF");
+    public static Colour4 BeatPulse => Colour4.FromHex("#FF6666");
+    public static Colour4 ScrollMultiply => Colour4.FromHex("#c73673");
+    public static Colour4 TimeOffset => Colour4.FromHex("#fa8ca1");
+    public static Colour4 Note => Colour4.FromHex("#FFFFFF");
+    public static Colour4 Shader => Colour4.FromHex("#D65C5C");
+
     public static Colour4 Selection => Highlight;
 
     public static Colour4 DownloadFinished => Colour4.FromHex("#7BE87B");
     public static Colour4 DownloadQueued => Colour4.FromHex("#7BB1E8");
-
-    public static Colour4 RoleAdmin => Colour4.FromHex("#f7b373");
-    public static Colour4 RoleMod => Colour4.FromHex("#73d173");
-    public static Colour4 RolePurifier => Colour4.FromHex("#55b2ff");
-    public static Colour4 RoleFeatured => Colour4.FromHex("#ff7b74");
-    public static Colour4 RoleUser => Colour4.FromHex("#AA99FF");
-    public static Colour4 RoleBot => Colour4.FromHex("#1f1e33");
 
     public static Colour4 SocialTwitter => Colour4.FromHex("#1da1f2");
     public static Colour4 SocialYoutube => Colour4.FromHex("#ff0000");
@@ -92,32 +105,6 @@ public static class FluXisColors
             2 => Colour4.FromHex("#ff7b74"),
             3 => Colour4.FromHex("#55b2ff"),
             _ => Colour4.Black
-        };
-    }
-
-    public static Colour4 GetRoleColor(int role)
-    {
-        return role switch
-        {
-            1 => RoleFeatured,
-            2 => RolePurifier,
-            3 => RoleMod,
-            4 => RoleAdmin,
-            5 => RoleBot,
-            _ => RoleUser
-        };
-    }
-
-    public static Colour4 GetNameColor(int role)
-    {
-        return role switch
-        {
-            1 => RoleFeatured,
-            2 => RolePurifier,
-            3 => RoleMod,
-            4 => RoleAdmin,
-            5 => RoleBot,
-            _ => Colour4.White
         };
     }
 
@@ -209,27 +196,40 @@ public static class FluXisColors
         };
     }
 
-    public static Colour4 GetSnapColor(int snap)
+    public static Colour4 GetEditorSnapColor(int divisor) => divisor switch
     {
-        switch (snap)
+        1 => Colour4.White,
+        2 => Colour4.FromHex("#FF5555"),
+        3 => Colour4.FromHex("#8EFF55"),
+        4 => Colour4.FromHex("#558EFF"),
+        6 => Colour4.FromHex("#C655FF"),
+        8 => Colour4.FromHex("#FFE355"),
+        12 => Colour4.FromHex("#FF55AA"),
+        16 => Colour4.FromHex("#BFBFBF"),
+        _ => Colour4.White
+    };
+
+    public static Colour4 GetModTypeColor(ModType modType)
+    {
+        switch (modType)
         {
-            case 0: // 1/1
-                return Colour4.FromHex("#FF5555");
+            case ModType.Rate:
+                return Colour4.FromHex("#ffdb69");
 
-            case 8: // 1/2
-                return Colour4.FromHex("#5555FF");
+            case ModType.DifficultyDecrease:
+                return Colour4.FromHex("#b2ff66");
 
-            case 4 or 12: // 1/4
-                return Colour4.FromHex("#FFFF55");
+            case ModType.DifficultyIncrease:
+                return Colour4.FromHex("#ff6666");
 
-            case 2 or 6 or 10 or 14: // 1/8
-                return Colour4.FromHex("#55FF55");
+            case ModType.Automation:
+                return Colour4.FromHex("#66b3ff");
 
-            case 1 or 3 or 5 or 7 or 9 or 11 or 13 or 15: // 1/16
-                return Colour4.FromHex("#FF55FF");
+            case ModType.Misc:
+                return Colour4.FromHex("#8866ff");
 
             default:
-                return Colour4.White;
+                return Colour4.FromHex("#cccccc");
         }
     }
 }

@@ -36,6 +36,9 @@ public class OsuImport : MapImporter
 
     public override void Import(string path)
     {
+        if (!File.Exists(path))
+            return;
+
         var notification = CreateNotification();
 
         try
@@ -43,7 +46,7 @@ public class OsuImport : MapImporter
             var fileName = Path.GetFileNameWithoutExtension(path);
             var folder = CreateTempFolder(fileName);
 
-            var osz = ZipFile.OpenRead(path);
+            using var osz = ZipFile.OpenRead(path);
 
             var sb = osz.Entries.FirstOrDefault(e => e.FullName.EndsWith(".osb"))?.FullName;
 
@@ -51,14 +54,19 @@ public class OsuImport : MapImporter
             {
                 var entry = osz.GetEntry(sb);
 
-                if (entry == null)
-                    throw new Exception("Storyboard file not found");
-
-                var data = new StreamReader(entry.Open()).ReadToEnd();
-                var storyboard = new OsuStoryboardParser().Parse(data);
-                var json = storyboard.Serialize();
-                WriteFile(json, folder, $"{sb}.fsb");
-                sb = $"{sb}.fsb";
+                if (entry != null)
+                {
+                    var data = new StreamReader(entry.Open()).ReadToEnd();
+                    var storyboard = new OsuStoryboardParser().Parse(data);
+                    var json = storyboard.Serialize();
+                    WriteFile(json, folder, $"{sb}.fsb");
+                    sb = $"{sb}.fsb";
+                }
+                else
+                {
+                    Logger.Log("Failed to find storyboard file in .osz archive!", LoggingTarget.Runtime, LogLevel.Error);
+                    sb = string.Empty;
+                }
             }
 
             var success = 0;
@@ -72,6 +80,13 @@ public class OsuImport : MapImporter
                     {
                         var map = parseOsuMap(entry);
                         var info = map.ToMapInfo();
+
+                        if (info == null)
+                        {
+                            failed++;
+                            continue;
+                        }
+
                         info.StoryboardFile = sb ?? string.Empty;
                         WriteFile(info.Serialize(), folder, $"{entry.FullName}.fsc");
                         success++;
@@ -86,12 +101,10 @@ public class OsuImport : MapImporter
                     CopyFile(entry, folder);
             }
 
-            osz.Dispose();
-
             if (success == 0)
             {
                 if (failed == 0)
-                    notification.TextFailed = "No osu!mania maps found in the .osz file";
+                    notification.TextFailed = "No osu!mania maps found in the .osz archive!";
 
                 notification.State = LoadingState.Failed;
                 return;
@@ -107,7 +120,7 @@ public class OsuImport : MapImporter
         catch (Exception e)
         {
             notification.State = LoadingState.Failed;
-            Logger.Error(e, "Error while importing osu! map");
+            Logger.Error(e, "Error while importing osu! map.");
         }
     }
 
@@ -185,7 +198,6 @@ public class OsuImport : MapImporter
                 var realmMapSet = new OsuRealmMapSet(mapList)
                 {
                     FolderPath = Path.Combine(songsPath, set.Key),
-                    Managed = true,
                     Resources = resources
                 };
 
@@ -194,8 +206,13 @@ public class OsuImport : MapImporter
                     // an extremely stupid thing we need to do...
                     // to get the map background, we have to load the map,
                     // because for some reason the background is not in the .db file
-                    // this increades the loading time by a lot, but there is no other way
-                    var osuMap = ParseOsuMap(File.ReadAllText(songsPath + "/" + map.FolderName + "/" + map.BeatmapFileName), true);
+                    // this increases the loading time by a lot, but there is no other way
+                    var mapPath = Path.Combine(songsPath, map.FolderName, map.BeatmapFileName);
+
+                    if (!File.Exists(mapPath))
+                        continue;
+
+                    var osuMap = ParseOsuMap(File.ReadAllText(mapPath), true);
 
                     var realmMap = new OsuRealmMap
                     {
@@ -223,10 +240,7 @@ public class OsuImport : MapImporter
                             BPMMax = 0,
                             NoteCount = map.CountHitCircles,
                             LongNoteCount = map.CountSliders,
-                            NotesPerSecond = (map.CountHitCircles + map.CountSliders) / (map.TotalTime / 1000f),
-                            HasScrollVelocity = false,
-                            HasLaneSwitch = false,
-                            HasFlash = false
+                            NotesPerSecond = (map.CountHitCircles + map.CountSliders) / (map.TotalTime / 1000f)
                         },
                         KeyCount = (int)map.CircleSize,
                         Rating = 0

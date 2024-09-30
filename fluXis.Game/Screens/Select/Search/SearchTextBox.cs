@@ -1,5 +1,7 @@
+using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Graphics.UserInterface.Text;
+using fluXis.Game.Localization;
 using fluXis.Game.Utils;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
@@ -11,6 +13,11 @@ public partial class SearchTextBox : FluXisTextBox
     [Resolved]
     private SearchFilters filters { get; set; }
 
+    public SearchTextBox()
+    {
+        FontSize = FluXisSpriteText.GetWebFontSize(22);
+    }
+
     [BackgroundDependencyLoader]
     private void load()
     {
@@ -20,7 +27,7 @@ public partial class SearchTextBox : FluXisTextBox
         Height = 40;
         Anchor = Anchor.CentreLeft;
         Origin = Anchor.CentreLeft;
-        PlaceholderText = "Click to Search...";
+        PlaceholderText = LocalizationStrings.SongSelect.SearchPlaceholder;
         CornerRadius = 0;
     }
 

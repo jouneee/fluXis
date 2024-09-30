@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using fluXis.Game.Screens.Select.Info.Scores;
+using fluXis.Game.Utils;
 using osu.Framework.Configuration;
 using osu.Framework.Platform;
 
@@ -38,12 +40,13 @@ public class FluXisConfig : IniConfigManager<FluXisSetting>
         SetDefault(FluXisSetting.BackgroundPulse, false);
 
         SetDefault(FluXisSetting.LaneSwitchAlerts, true);
-        SetDefault(FluXisSetting.DisableEpilepsyIntrusingEffects, false);
 
         SetDefault(FluXisSetting.HudVisibility, HudVisibility.Always);
+        SetDefault(FluXisSetting.GameplayLeaderboardVisible, true);
+        SetDefault(FluXisSetting.GameplayLeaderboardMode, GameplayLeaderboardMode.Score);
 
         // UI
-        SetDefault(FluXisSetting.UIScale, 1, 1f, 1.5f, 0.01f);
+        SetDefault(FluXisSetting.UIScale, 1, 1f, 1.25f, 0.01f);
         SetDefault(FluXisSetting.HoldToConfirm, 400f, 0f, 1000f, 200f);
         SetDefault(FluXisSetting.SkipIntro, false);
         SetDefault(FluXisSetting.Parallax, true);
@@ -57,6 +60,10 @@ public class FluXisConfig : IniConfigManager<FluXisSetting>
         // UI // Song Select
         SetDefault(FluXisSetting.SongSelectBlur, true);
         SetDefault(FluXisSetting.LoopMode, LoopMode.Limited);
+        SetDefault(FluXisSetting.GroupingMode, MapUtils.GroupingMode.Default);
+        SetDefault(FluXisSetting.SortingMode, MapUtils.SortingMode.Title);
+        SetDefault(FluXisSetting.SortingInverse, false);
+        SetDefault(FluXisSetting.LeaderboardType, ScoreListType.Local);
 
         // UI // Editor
         SetDefault(FluXisSetting.EditorDim, 0.4f, 0f, .8f, 0.2f);
@@ -66,6 +73,10 @@ public class FluXisConfig : IniConfigManager<FluXisSetting>
         // Audio
         SetDefault(FluXisSetting.InactiveVolume, 0.5d, 0d, 1d, 0.01d);
         SetDefault(FluXisSetting.HitSoundVolume, 1d, 0d, 1d, 0.01d);
+
+        // Audio // Panning
+        SetDefault(FluXisSetting.UIPanning, 0.75d, 0d, 1d, 0.01d);
+        SetDefault(FluXisSetting.HitsoundPanning, 1d, 0d, 1d, 0.01d);
 
         // Audio // Offset
         SetDefault(FluXisSetting.GlobalOffset, 0, -1000, 1000, 1);
@@ -78,9 +89,12 @@ public class FluXisConfig : IniConfigManager<FluXisSetting>
         SetDefault(FluXisSetting.Username, string.Empty);
         SetDefault(FluXisSetting.Token, string.Empty);
 
+        // Debug
+        SetDefault(FluXisSetting.LogAPIResponses, false);
+
         // Misc
         SetDefault(FluXisSetting.ReleaseChannel, ReleaseChannel.Stable);
-        SetDefault(FluXisSetting.NowPlaying, false);
+        SetDefault(FluXisSetting.OpenRGBIntegration, false);
     }
 }
 
@@ -111,9 +125,10 @@ public enum FluXisSetting
     BackgroundPulse,
 
     LaneSwitchAlerts,
-    DisableEpilepsyIntrusingEffects,
 
     HudVisibility,
+    GameplayLeaderboardVisible,
+    GameplayLeaderboardMode,
 
     // UI
     UIScale,
@@ -130,6 +145,10 @@ public enum FluXisSetting
     // UI // Song Select
     SongSelectBlur,
     LoopMode,
+    GroupingMode,
+    SortingMode,
+    SortingInverse,
+    LeaderboardType,
 
     // UI // Editor
     EditorDim,
@@ -139,6 +158,12 @@ public enum FluXisSetting
     // Audio
     InactiveVolume,
     HitSoundVolume,
+
+    // Audio // Panning
+    UIPanning,
+    HitsoundPanning,
+
+    // Audio // Offset
     GlobalOffset,
     DisableOffsetInReplay,
 
@@ -149,7 +174,10 @@ public enum FluXisSetting
     Username,
     Token,
 
+    // Debug
+    LogAPIResponses,
+
     // Misc
     ReleaseChannel,
-    NowPlaying // saves the current song to a json file
+    OpenRGBIntegration
 }

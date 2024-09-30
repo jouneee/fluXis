@@ -1,7 +1,7 @@
 using fluXis.Game.Graphics;
-using fluXis.Game.Online.API.Models.Other;
 using fluXis.Game.Online.API.Requests;
 using fluXis.Game.Online.Fluxel;
+using fluXis.Shared.Components.Other;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
@@ -13,7 +13,7 @@ namespace fluXis.Game.Screens.Menu.UI.Updates;
 public partial class MenuUpdates : CompositeDrawable
 {
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     public bool CanShow { get; set; }
 
@@ -67,7 +67,7 @@ public partial class MenuUpdates : CompositeDrawable
             });
         };
 
-        req.PerformAsync(fluxel);
+        api.PerformRequestAsync(req);
     }
 
     protected override void Update()

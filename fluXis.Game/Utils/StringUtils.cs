@@ -17,6 +17,8 @@ public static class StringUtils
     public static double ToDoubleInvariant(this string value) => double.Parse(value, CultureInfo.InvariantCulture);
     public static bool TryParseDoubleInvariant(this string value, out double result) => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
 
+    public static bool EqualsLower(this string first, string second) => first.Equals(second, StringComparison.InvariantCultureIgnoreCase);
+
     public static string CensorEmail(string mail)
     {
         // we want something like dummy@example.com
@@ -41,7 +43,9 @@ public static class StringUtils
         return $"{nameCensored}@{domainNameCensored}.{tld}";
     }
 
-    public static string NumberWithOrderSuffix(int number)
+    public static string NumberWithOrderSuffix(this int number) => NumberWithOrderSuffix((long)number);
+
+    public static string NumberWithOrderSuffix(this long number)
     {
         var numStr = number.ToString();
 

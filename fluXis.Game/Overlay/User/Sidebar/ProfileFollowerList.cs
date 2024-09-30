@@ -8,6 +8,7 @@ using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Online.API.Requests.Users;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Shared.Components.Users;
+using Humanizer;
 using JetBrains.Annotations;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
@@ -22,10 +23,11 @@ namespace fluXis.Game.Overlay.User.Sidebar;
 public partial class ProfileFollowerList : FillFlowContainer
 {
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     private long id { get; }
 
+    private FluXisSpriteText countText;
     private FillFlowContainer noFollowers;
     private FillFlowContainer followers;
 
@@ -44,15 +46,28 @@ public partial class ProfileFollowerList : FillFlowContainer
 
         InternalChildren = new Drawable[]
         {
-            new Container
+            new FillFlowContainer
             {
                 RelativeSizeAxes = Axes.X,
                 AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Horizontal,
                 Padding = new MarginPadding { Horizontal = 10 },
-                Child = new FluXisSpriteText
+                Children = new[]
                 {
-                    Text = "Followers",
-                    WebFontSize = 24
+                    new FluXisSpriteText
+                    {
+                        Text = "Followers ", // yes, this space is intentional
+                        Anchor = Anchor.CentreLeft,
+                        Origin = Anchor.CentreLeft,
+                        WebFontSize = 24
+                    },
+                    countText = new FluXisSpriteText
+                    {
+                        Alpha = .8f,
+                        Anchor = Anchor.CentreLeft,
+                        Origin = Anchor.CentreLeft,
+                        WebFontSize = 16
+                    }
                 }
             },
             noFollowers = new FillFlowContainer
@@ -93,27 +108,31 @@ public partial class ProfileFollowerList : FillFlowContainer
     {
         base.LoadComplete();
 
+        if (id == -1)
+            return;
+
         var req = new UserFollowersRequest(id);
-        req.Success += res =>
+        req.Success += res => SetData(res.Data);
+        api.PerformRequestAsync(req);
+    }
+
+    public void SetData(List<APIUser> data)
+    {
+        if (data.Count == 0)
         {
-            var data = res.Data;
+            noFollowers.FadeIn(400);
+            return;
+        }
 
-            if (data.Count == 0)
-            {
-                noFollowers.FadeIn(400);
-                return;
-            }
+        countText.Text = data.Count.ToMetric();
 
-            // show the first 3 as normal
-            for (var i = 0; i < Math.Min(3, data.Count); i++)
-                followers.Add(new FollowerEntry(data[i]));
+        // show the first 3 as normal
+        for (var i = 0; i < Math.Min(3, data.Count); i++)
+            followers.Add(new FollowerEntry(data[i]));
 
-            // if there are more than 3, show an overflow
-            if (data.Count > 3)
-                followers.Add(new FollowerOverflow(data.GetRange(3, data.Count - 3)));
-        };
-
-        req.PerformAsync(fluxel);
+        // if there are more than 3, show an overflow
+        if (data.Count > 3)
+            followers.Add(new FollowerOverflow(data.GetRange(3, data.Count - 3)));
     }
 
     private partial class FollowerEntry : FillFlowContainer
@@ -122,9 +141,9 @@ public partial class ProfileFollowerList : FillFlowContainer
         [Resolved(CanBeNull = true)]
         private FluXisGame game { get; set; }
 
-        private APIUserShort user { get; }
+        private APIUser user { get; }
 
-        public FollowerEntry(APIUserShort user)
+        public FollowerEntry(APIUser user)
         {
             this.user = user;
         }
@@ -172,9 +191,9 @@ public partial class ProfileFollowerList : FillFlowContainer
 
     private partial class FollowerOverflow : FillFlowContainer
     {
-        private List<APIUserShort> users { get; }
+        private List<APIUser> users { get; }
 
-        public FollowerOverflow(List<APIUserShort> users)
+        public FollowerOverflow(List<APIUser> users)
         {
             this.users = users;
         }
@@ -191,7 +210,7 @@ public partial class ProfileFollowerList : FillFlowContainer
             {
                 new FluXisSpriteText
                 {
-                    Text = $"+{users.Count} more",
+                    Text = $"+{users.Count.ToMetric()} more",
                     Anchor = Anchor.CentreLeft,
                     Origin = Anchor.CentreLeft,
                     WebFontSize = 14
@@ -214,11 +233,11 @@ public partial class ProfileFollowerList : FillFlowContainer
         [Resolved(CanBeNull = true)]
         private FluXisGame game { get; set; }
 
-        private APIUserShort user { get; }
+        private APIUser user { get; }
 
         private const int outline_width = 2;
 
-        public OverflowEntry(APIUserShort user)
+        public OverflowEntry(APIUser user)
         {
             this.user = user;
         }

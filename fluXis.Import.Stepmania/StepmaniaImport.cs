@@ -31,6 +31,9 @@ public class StepmaniaImport : MapImporter
 
     public override void Import(string path)
     {
+        if (!File.Exists(path))
+            return;
+
         var notification = CreateNotification();
 
         try
@@ -105,7 +108,7 @@ public class StepmaniaImport : MapImporter
                     {
                         Title = info.Metadata.Title,
                         Artist = info.Metadata.Artist,
-                        Source = info.Metadata.Source,
+                        Source = info.Metadata.AudioSource,
                         Audio = info.AudioFile,
                         Background = info.BackgroundFile,
                         PreviewTime = info.Metadata.PreviewTime,
@@ -113,15 +116,12 @@ public class StepmaniaImport : MapImporter
                     },
                     Filters = new RealmMapFilters
                     {
-                        Length = length,
+                        Length = (float)length,
                         BPMMin = info.TimingPoints.Min(x => x.BPM),
                         BPMMax = info.TimingPoints.Max(x => x.BPM),
                         NoteCount = hits,
                         LongNoteCount = lns,
-                        NotesPerSecond = (hits + lns) / (length / 1000f),
-                        HasScrollVelocity = false,
-                        HasLaneSwitch = false,
-                        HasFlash = false
+                        NotesPerSecond = (float)((hits + lns) / (length / 1000f))
                     }
                 };
 
@@ -132,7 +132,6 @@ public class StepmaniaImport : MapImporter
             {
                 FolderPath = Path.GetDirectoryName(file),
                 ID = Guid.NewGuid(),
-                Managed = true,
                 Resources = resources,
                 OnlineID = -1
             };

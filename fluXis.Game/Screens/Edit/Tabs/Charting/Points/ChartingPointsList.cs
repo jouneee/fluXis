@@ -1,6 +1,8 @@
 using System.Collections.Generic;
-using fluXis.Game.Map.Events;
+using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Map.Structures;
+using fluXis.Game.Map.Structures.Bases;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Screens.Edit.Tabs.Charting.Points.Entries;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.List;
 
@@ -30,7 +32,7 @@ public partial class ChartingPointsList : PointsList
     {
         return obj switch
         {
-            TimingPoint timing => new TimingPointEntry(timing), // these "as" casts are stupid but necessary
+            TimingPoint timing => new TimingPointEntry(timing),
             ScrollVelocity scroll => new ScrollVelocityEntry(scroll),
             LaneSwitchEvent lane => new LaneSwitchEntry(lane),
             _ => null
@@ -39,7 +41,7 @@ public partial class ChartingPointsList : PointsList
 
     protected override IEnumerable<AddButtonEntry> CreateAddEntries() => new AddButtonEntry[]
     {
-        new("Timing Point", () => Create(new TimingPoint { BPM = 120 })),
-        new("Scroll Velocity", () => Create(new ScrollVelocity { Multiplier = 1 }))
+        new("Timing Point", FluXisColors.TimingPoint, () => Create(new TimingPoint { BPM = 120 })),
+        new("Scroll Velocity", FluXisColors.ScrollVelocity, () => Create(new ScrollVelocity { Multiplier = 1 }))
     };
 }

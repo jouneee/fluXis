@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using fluXis.Game.Audio;
 using fluXis.Game.Database;
 using fluXis.Game.Database.Maps;
@@ -11,13 +12,16 @@ using fluXis.Game.Graphics.Background;
 using fluXis.Game.Graphics.Background.Cropped;
 using fluXis.Game.Import;
 using fluXis.Game.Map.Builtin.Roundhouse;
+using fluXis.Game.Map.Builtin.Spoophouse;
 using fluXis.Game.Map.Structures;
-using fluXis.Game.Online.API.Models.Maps;
 using fluXis.Game.Online.API.Requests.Maps;
+using fluXis.Game.Online.API.Requests.MapSets;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Overlay.Notifications.Tasks;
+using fluXis.Game.Storyboards;
 using fluXis.Game.Utils;
+using fluXis.Game.Utils.Extensions;
 using fluXis.Shared.Components.Maps;
 using fluXis.Shared.Utils;
 using JetBrains.Annotations;
@@ -41,7 +45,7 @@ public partial class MapStore : Component
     private FluXisRealm realm { get; set; }
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     [Resolved]
     private AudioManager audio { get; set; }
@@ -89,9 +93,9 @@ public partial class MapStore : Component
     public Action<RealmMapSet, RealmMapSet> MapSetUpdated;
     public Action CollectionUpdated;
 
-    public List<APIMapSet> DownloadQueue { get; } = new();
-    public Action<APIMapSet> DownloadStarted { get; set; }
-    public Action<APIMapSet> DownloadFinished { get; set; }
+    public List<long> DownloadQueue { get; } = new();
+    public Action<long> DownloadStarted { get; set; }
+    public Action<long> DownloadFinished { get; set; }
 
     [BackgroundDependencyLoader]
     private void load(BackgroundTextureStore backgroundStore, CroppedBackgroundStore croppedBackgroundStore)
@@ -170,7 +174,7 @@ public partial class MapStore : Component
         game.ShowMap(map);
     }
 
-    public void Save(RealmMap map, MapInfo info, MapEvents events, bool setStatus)
+    public void Save(RealmMap map, MapInfo info, MapEvents events, Storyboard storyboard, bool setStatus)
     {
         if (map == null || info == null)
             throw new ArgumentNullException();
@@ -197,6 +201,15 @@ public partial class MapStore : Component
         }
         else
             info.EffectFile = "";
+
+        if (storyboard is { Empty: false })
+        {
+            var filename = string.IsNullOrWhiteSpace(info.StoryboardFile) ? $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.fsb" : info.StoryboardFile;
+            File.WriteAllText(MapFiles.GetFullPath(set.GetPathForFile(filename)), storyboard.Serialize());
+            info.StoryboardFile = filename;
+        }
+        else
+            info.StoryboardFile = "";
 
         realm.RunWrite(r =>
         {
@@ -236,18 +249,21 @@ public partial class MapStore : Component
 
     public void UpdateMapSet(RealmMapSet oldMapSet, RealmMapSet newMapSet)
     {
-        MapSets.Remove(oldMapSet);
-        newMapSet.Resources = oldMapSet.Resources; // keep the resources
-        MapSets.Add(newMapSet);
-        MapSetUpdated?.Invoke(oldMapSet, newMapSet);
+        Scheduler.ScheduleIfNeeded(() =>
+        {
+            MapSets.Remove(oldMapSet);
+            newMapSet.Resources = oldMapSet.Resources; // keep the resources
+            MapSets.Add(newMapSet);
+            MapSetUpdated?.Invoke(oldMapSet, newMapSet);
 
-        if (Equals(CurrentMapSet, oldMapSet))
-            CurrentMapSet = newMapSet;
+            if (Equals(CurrentMapSet, oldMapSet))
+                CurrentMapSet = newMapSet;
+        });
     }
 
     public void DeleteMapSet(RealmMapSet mapSet)
     {
-        if (mapSet.Managed)
+        if (mapSet.AutoImported)
         {
             // notifications.Post("Cannot delete a managed mapset!");
             return;
@@ -288,17 +304,19 @@ public partial class MapStore : Component
     public RealmMapSet GetFromGuid(Guid guid) => MapSets.FirstOrDefault(set => set.ID == guid);
     public RealmMapSet GetFromGuid(string guid) => GetFromGuid(Guid.Parse(guid));
 
+    [CanBeNull]
+    public RealmMap GetMapFromGuid(Guid guid)
+        => MapSets.FirstOrDefault(set => set.Maps.Any(m => m.ID == guid))?
+            .Maps.FirstOrDefault(m => m.ID == guid);
+
     public string Export(RealmMapSet set, TaskNotificationData notification, bool openFolder = true)
     {
         try
         {
-            string exportFolder = storage.GetFullPath("export");
-            if (!Directory.Exists(exportFolder)) Directory.CreateDirectory(exportFolder);
-
             var fileName = $"{set.Metadata.Title} - {set.Metadata.Artist} [{set.Metadata.Mapper}].fms";
             fileName = PathUtils.RemoveAllInvalidPathCharacters(fileName);
 
-            string path = Path.Combine(exportFolder, fileName);
+            string path = game.ExportStorage.GetFullPath(fileName);
             if (File.Exists(path)) File.Delete(path);
             ZipArchive archive = ZipFile.Open(path, ZipArchiveMode.Create);
 
@@ -323,7 +341,7 @@ public partial class MapStore : Component
 
             archive.Dispose();
             notification.State = LoadingState.Complete;
-            if (openFolder) PathUtils.OpenFolder(exportFolder);
+            if (openFolder) game.ExportStorage.PresentFileExternally(fileName);
             return path;
         }
         catch (Exception e)
@@ -337,15 +355,19 @@ public partial class MapStore : Component
     [CanBeNull]
     public APIMapLookup LookUpHash(string hash)
     {
-        var req = new MapLookupRequest(hash);
-        req.Perform(fluxel);
-        return req.Response.Status != 200 ? null : req.Response.Data;
+        var req = new MapLookupRequest
+        {
+            Hash = hash
+        };
+
+        api.PerformRequest(req);
+        return req.IsSuccessful ? req.Response!.Data : null;
     }
 
     public RealmMap CreateNew()
     {
         var map = RealmMap.CreateNew();
-        map.Metadata.Mapper = fluxel.LoggedInUser?.Username ?? "Me";
+        map.Metadata.Mapper = api.User.Value?.Username ?? "Me";
         map.MapSet.Resources = resources;
         return realm.RunWrite(r =>
         {
@@ -356,104 +378,32 @@ public partial class MapStore : Component
         });
     }
 
-    public RealmMap CreateNewDifficulty(RealmMapSet set, RealmMap map, string name, MapInfo refInfo = null)
+    public RealmMap CreateNewDifficulty(RealmMapSet set, RealmMap map, MapInfo refInfo, CreateNewMapParameters param)
     {
         var id = Guid.NewGuid();
         var fileName = $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.fsc";
-
-        var info = new MapInfo(new MapMetadata
-        {
-            Title = map.Metadata.Title,
-            Artist = map.Metadata.Artist,
-            Mapper = map.Metadata.Mapper,
-            Difficulty = name,
-            Source = map.Metadata.Source,
-            Tags = map.Metadata.Tags,
-            PreviewTime = map.Metadata.PreviewTime
-        })
-        {
-            AudioFile = map.Metadata.Audio,
-            BackgroundFile = map.Metadata.Background,
-            CoverFile = map.MapSet.Cover,
-            VideoFile = refInfo?.VideoFile ?? "",
-            TimingPoints = refInfo?.TimingPoints.Select(x => new TimingPoint
-            {
-                BPM = x.BPM,
-                Time = x.Time,
-                Signature = x.Signature,
-                HideLines = x.HideLines
-            }).ToList() ?? new List<TimingPoint> { new() { BPM = 120, Time = 0, Signature = 4 } }, // Add default timing point to avoid issues
-        };
-
-        var realmMap = new RealmMap
-        {
-            ID = id,
-            Difficulty = name,
-            Metadata = new RealmMapMetadata
-            {
-                Title = map.Metadata.Title,
-                Artist = map.Metadata.Artist,
-                Mapper = map.Metadata.Mapper,
-                Source = map.Metadata.Source,
-                Tags = map.Metadata.Tags,
-                Background = map.Metadata.Background,
-                Audio = map.Metadata.Audio,
-                PreviewTime = map.Metadata.PreviewTime,
-                ColorHex = map.Metadata.ColorHex
-            },
-            FileName = fileName,
-            OnlineID = 0,
-            Hash = MapUtils.GetHash(info.Serialize()),
-            Filters = MapUtils.GetMapFilters(info, new MapEvents()),
-            KeyCount = map.KeyCount,
-            MapSet = set
-        };
-
-        save(realmMap, info);
-        return addDifficultyToSet(set, realmMap);
-    }
-
-    public RealmMap CopyToNewDifficulty(RealmMapSet set, RealmMap map, MapInfo refInfo, string name)
-    {
-        var id = Guid.NewGuid();
-        var fileName = $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.fsc";
-        string effectName = "";
-
+        var effectName = "";
         var refEffect = refInfo.GetMapEvents();
-        var refEffectString = refEffect.Save();
 
-        if (!string.IsNullOrEmpty(refEffectString))
+        if (param.LinkEffects)
+            effectName = refInfo.EffectFile;
+        else if (!refEffect.Empty)
         {
             effectName = $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.ffx";
             string effectPath = MapFiles.GetFullPath(set.GetPathForFile(effectName));
-            File.WriteAllText(effectPath, refEffectString);
+            File.WriteAllText(effectPath, refEffect.Save());
         }
 
-        var info = new MapInfo(new MapMetadata
-        {
-            Title = map.Metadata.Title,
-            Artist = map.Metadata.Artist,
-            Mapper = map.Metadata.Mapper,
-            Difficulty = name,
-            Source = map.Metadata.Source,
-            Tags = map.Metadata.Tags,
-            PreviewTime = map.Metadata.PreviewTime
-        })
-        {
-            AudioFile = map.Metadata.Audio,
-            BackgroundFile = map.Metadata.Background,
-            CoverFile = map.MapSet.Cover,
-            VideoFile = refInfo.VideoFile,
-            EffectFile = effectName,
-            HitObjects = refInfo.HitObjects.Select(x => x.Copy()).ToList(),
-            TimingPoints = refInfo.TimingPoints.Select(x => x.Copy()).ToList(),
-            ScrollVelocities = refInfo.ScrollVelocities.Select(x => x.Copy()).ToList()
-        };
+        var info = refInfo.JsonCopy();
+        info.EffectFile = effectName;
+
+        if (!param.CopyNotes)
+            info.HitObjects = new List<HitObject>();
 
         var realmMap = new RealmMap
         {
             ID = id,
-            Difficulty = name,
+            Difficulty = param.DifficultyName,
             Metadata = new RealmMapMetadata
             {
                 Title = map.Metadata.Title,
@@ -470,7 +420,9 @@ public partial class MapStore : Component
             Hash = MapUtils.GetHash(info.Serialize()),
             Filters = MapUtils.GetMapFilters(info, refEffect),
             KeyCount = map.KeyCount,
-            MapSet = set
+            MapSet = set,
+            AccuracyDifficulty = map.AccuracyDifficulty,
+            HealthDifficulty = map.HealthDifficulty
         };
 
         save(realmMap, info);
@@ -527,16 +479,36 @@ public partial class MapStore : Component
         });
     }
 
-    public void StartDownload(APIMapSet mapSet)
+    protected void StartDownload(APIMapSet mapSet) => StartDownload(mapSet.ID);
+    protected void FinishDownload(APIMapSet mapSet) => FinishDownload(mapSet.ID);
+
+    protected void StartDownload(long id)
     {
-        DownloadQueue.Add(mapSet);
-        DownloadStarted?.Invoke(mapSet);
+        DownloadQueue.Add(id);
+        DownloadStarted?.Invoke(id);
     }
 
-    public void FinishDownload(APIMapSet mapSet)
+    protected void FinishDownload(long id)
     {
-        DownloadQueue.Remove(mapSet);
-        DownloadFinished?.Invoke(mapSet);
+        DownloadQueue.Remove(id);
+        DownloadFinished?.Invoke(id);
+    }
+
+    public void DownloadMapSet(long id)
+    {
+        var set = DownloadQueue.FirstOrDefault(x => x == id, -1);
+
+        if (set != -1)
+            return;
+
+        var req = new MapSetRequest(id);
+        req.Failure += ex => notifications.SendError("Failed to download mapset", ex.Message);
+        api.PerformRequest(req);
+
+        if (!req.IsSuccessful)
+            return;
+
+        DownloadMapSet(req.Response!.Data);
     }
 
     public void DownloadMapSet(APIMapSet set)
@@ -550,7 +522,7 @@ public partial class MapStore : Component
             return;
         }
 
-        if (DownloadQueue.Any(x => x.ID == set.ID))
+        if (DownloadQueue.Any(x => x == set.ID))
             return;
 
         var notification = new TaskNotificationData
@@ -560,64 +532,147 @@ public partial class MapStore : Component
             TextFinished = "Done! Click to view."
         };
 
-        var req = fluxel.CreateAPIRequest($"/mapset/{set.ID}/download");
-        req.DownloadProgress += (current, total) => notification.Progress = (float)current / total;
-        req.Started += () => Logger.Log($"Downloading mapset: {set.Title} - {set.Artist}", LoggingTarget.Network);
-        req.Failed += exception =>
+        Logger.Log($"Downloading mapset: {set.Title} - {set.Artist}", LoggingTarget.Network);
+
+        var req = new MapSetDownloadRequest(set.ID);
+        req.Progress += (current, total) => notification.Progress = (float)current / total;
+        req.Failure += exception =>
         {
             Logger.Log($"Failed to download mapset: {exception.Message}", LoggingTarget.Network);
             notification.State = LoadingState.Failed;
 
             FinishDownload(set);
         };
-        req.Finished += () =>
+        req.Success += () =>
         {
             notification.Progress = 1;
             FinishDownload(set);
 
-            try
+            Task.Run(() =>
             {
-                Logger.Log($"Finished downloading mapset: {set.Title} - {set.Artist}", LoggingTarget.Network);
-                var data = req.GetResponseData();
+                try
+                {
+                    Logger.Log($"Finished downloading mapset: {set.Title} - {set.Artist}", LoggingTarget.Network);
+                    var data = req.ResponseStream;
 
-                if (data == null)
+                    if (data == null)
+                    {
+                        notification.State = LoadingState.Failed;
+                        return;
+                    }
+
+                    // write data to file
+                    var path = storage.GetFullPath($"download/{set.ID}.zip");
+                    var dir = Path.GetDirectoryName(path);
+
+                    if (!Directory.Exists(dir))
+                        Directory.CreateDirectory(dir);
+
+                    if (File.Exists(path))
+                        File.Delete(path);
+
+                    File.WriteAllBytes(path, data.ToArray());
+
+                    // import
+                    new FluXisImport
+                    {
+                        MapStore = this,
+                        Storage = storage,
+                        Notifications = notifications,
+                        Realm = realm,
+                        Notification = notification
+                    }.Import(path);
+                }
+                catch (Exception ex)
                 {
                     notification.State = LoadingState.Failed;
-                    return;
+                    Logger.Log($"Failed to import mapset: {ex.Message}", LoggingTarget.Network);
                 }
-
-                // write data to file
-                var path = storage.GetFullPath($"download/{set.ID}.zip");
-                var dir = Path.GetDirectoryName(path);
-
-                if (!Directory.Exists(dir))
-                    Directory.CreateDirectory(dir);
-
-                if (File.Exists(path))
-                    File.Delete(path);
-
-                File.WriteAllBytes(path, data);
-
-                // import
-                new FluXisImport
-                {
-                    MapStore = this,
-                    Storage = storage,
-                    Notifications = notifications,
-                    Realm = realm,
-                    Notification = notification
-                }.Import(path);
-            }
-            catch (Exception ex)
-            {
-                notification.State = LoadingState.Failed;
-                Logger.Log($"Failed to import mapset: {ex.Message}", LoggingTarget.Network);
-            }
+            });
         };
 
         StartDownload(set);
-        req.PerformAsync();
+        api.PerformRequestAsync(req);
 
+        notifications.AddTask(notification);
+    }
+
+    public void DownloadMapSetUpdate(RealmMapSet set)
+    {
+        if (set is not { OnlineID: > 0 })
+            return;
+
+        if (DownloadQueue.Any(x => x == set.OnlineID))
+            return;
+
+        var notification = new TaskNotificationData
+        {
+            Text = $"{set.Metadata.Title} - {set.Metadata.Artist}",
+            TextWorking = "Updating...",
+            TextFinished = "Done! Click to view."
+        };
+
+        Logger.Log($"Updating mapset: {set.Metadata.Title} - {set.Metadata.Artist}", LoggingTarget.Network);
+
+        var req = new MapSetDownloadRequest(set.OnlineID);
+        req.Progress += (current, total) => notification.Progress = (float)current / total;
+        req.Failure += exception =>
+        {
+            Logger.Log($"Failed to download mapset: {exception.Message}", LoggingTarget.Network);
+            notification.State = LoadingState.Failed;
+            FinishDownload(set.OnlineID);
+        };
+        req.Success += () =>
+        {
+            notification.Progress = 1;
+            FinishDownload(set.OnlineID);
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    Logger.Log($"Finished downloading mapset: {set.Metadata.Title} - {set.Metadata.Artist}", LoggingTarget.Network);
+                    var data = req.ResponseStream;
+
+                    if (data == null)
+                    {
+                        notification.State = LoadingState.Failed;
+                        return;
+                    }
+
+                    // write data to file
+                    var path = storage.GetFullPath($"download/{set.ID}.zip");
+                    var dir = Path.GetDirectoryName(path);
+
+                    if (!Directory.Exists(dir))
+                        Directory.CreateDirectory(dir);
+
+                    if (File.Exists(path))
+                        File.Delete(path);
+
+                    File.WriteAllBytes(path, data.ToArray());
+
+                    // import
+                    new FluXisImport
+                    {
+                        MapStore = this,
+                        Storage = storage,
+                        Notifications = notifications,
+                        Realm = realm,
+                        Notification = notification
+                    }.ImportAsUpdate(path, set);
+                    notification.State = LoadingState.Complete;
+                }
+                catch (Exception ex)
+                {
+                    notification.State = LoadingState.Failed;
+                    Logger.Log($"Failed to update mapset: {ex.Message}", LoggingTarget.Network);
+                }
+            });
+        };
+
+        StartDownload(set.OnlineID);
+        api.PerformRequestAsync(req);
         notifications.AddTask(notification);
     }
 
@@ -649,9 +704,10 @@ public partial class MapStore : Component
 
     public RealmMapSet CreateBuiltinMap(BuiltinMap map)
     {
-        var set = map switch
+        RealmMapSet set = map switch
         {
             BuiltinMap.Roundhouse => new RoundhouseMapSet(),
+            BuiltinMap.Spoophouse => new SpoophouseMapSet(),
             _ => throw new ArgumentOutOfRangeException(nameof(map), map, null)
         };
 
@@ -661,6 +717,7 @@ public partial class MapStore : Component
 
     public enum BuiltinMap
     {
-        Roundhouse
+        Roundhouse,
+        Spoophouse
     }
 }

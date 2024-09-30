@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using fluXis.Game.Graphics.Sprites;
-using fluXis.Game.Map.Events;
-using fluXis.Game.Map.Structures;
+using fluXis.Game.Graphics.UserInterface.Color;
+using fluXis.Game.Map.Structures.Bases;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.List;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings.Preset;
@@ -14,7 +15,7 @@ namespace fluXis.Game.Screens.Edit.Tabs.Design.Points.Entries;
 public partial class PlayfieldFadeEntry : PointListEntry
 {
     protected override string Text => "Playfield Fade";
-    protected override Colour4 Color => Colour4.FromHex("#0180FE");
+    protected override Colour4 Color => FluXisColors.PlayfieldFade;
 
     private PlayfieldFadeEvent fade => Object as PlayfieldFadeEvent;
 
@@ -23,7 +24,7 @@ public partial class PlayfieldFadeEntry : PointListEntry
     {
     }
 
-    protected override ITimedObject CreateClone() => new PlayfieldFadeEvent
+    public override ITimedObject CreateClone() => new PlayfieldFadeEvent
     {
         Time = Object.Time,
         Duration = fade.Duration,
@@ -59,7 +60,8 @@ public partial class PlayfieldFadeEntry : PointListEntry
                     fade.Alpha = v;
                     Map.Update(fade);
                 }
-            }
+            },
+            new PointSettingsEasing<PlayfieldFadeEvent>(Map, fade)
         });
     }
 }

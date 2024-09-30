@@ -1,4 +1,5 @@
-using fluXis.Game.Map.Structures;
+using fluXis.Game.Graphics.UserInterface.Color;
+using fluXis.Game.Map.Structures.Bases;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 
@@ -9,7 +10,7 @@ public partial class PreviewPointTag : EditorTag
     [Resolved]
     private EditorMap map { get; set; }
 
-    public override Colour4 TagColour => Colour4.FromHex("FDD27F");
+    public override Colour4 TagColour => FluXisColors.PreviewPoint;
 
     public PreviewPointTag(EditorTagContainer parent)
         : base(parent, new PreviewPointObject())
@@ -31,6 +32,6 @@ public partial class PreviewPointTag : EditorTag
     // placeholder class for the preview point
     private class PreviewPointObject : ITimedObject
     {
-        public float Time { get; set; }
+        public double Time { get; set; }
     }
 }

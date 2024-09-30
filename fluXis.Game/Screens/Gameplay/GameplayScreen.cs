@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -7,9 +8,9 @@ using fluXis.Game.Audio;
 using fluXis.Game.Audio.Transforms;
 using fluXis.Game.Screens.Gameplay.Ruleset;
 using fluXis.Game.Configuration;
+using fluXis.Game.Configuration.Experiments;
 using fluXis.Game.Database;
 using fluXis.Game.Database.Maps;
-using fluXis.Game.Database.Score;
 using fluXis.Game.Graphics.Background;
 using fluXis.Game.Graphics.Shaders;
 using fluXis.Game.Graphics.Shaders.Bloom;
@@ -17,8 +18,12 @@ using fluXis.Game.Graphics.Shaders.Chromatic;
 using fluXis.Game.Graphics.Shaders.Greyscale;
 using fluXis.Game.Graphics.Shaders.Invert;
 using fluXis.Game.Graphics.Shaders.Mosaic;
+using fluXis.Game.Graphics.Shaders.Noise;
+using fluXis.Game.Graphics.Shaders.Retro;
+using fluXis.Game.Graphics.Shaders.Vignette;
 using fluXis.Game.Input;
 using fluXis.Game.Map;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Mods;
 using fluXis.Game.Online.Activity;
 using fluXis.Game.Online.API.Requests.Scores;
@@ -31,6 +36,7 @@ using fluXis.Game.Scoring.Processing.Health;
 using fluXis.Game.Screens.Gameplay.Audio;
 using fluXis.Game.Screens.Gameplay.Audio.Hitsounds;
 using fluXis.Game.Screens.Gameplay.HUD;
+using fluXis.Game.Screens.Gameplay.HUD.Leaderboard;
 using fluXis.Game.Screens.Gameplay.Input;
 using fluXis.Game.Screens.Gameplay.Overlay;
 using fluXis.Game.Screens.Gameplay.Overlay.Effect;
@@ -40,6 +46,9 @@ using fluXis.Game.Screens.Result;
 using fluXis.Game.Skinning.Default;
 using fluXis.Game.Storyboards;
 using fluXis.Game.Storyboards.Drawables;
+using fluXis.Shared.Components.Users;
+using fluXis.Shared.Replays;
+using fluXis.Shared.Scoring;
 using fluXis.Shared.Scoring.Enums;
 using fluXis.Shared.Utils;
 using osu.Framework.Allocation;
@@ -64,15 +73,19 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
     public override float BackgroundDim => backgroundDim?.Value ?? .4f;
     public override bool ShowToolbar => false;
     public override bool AllowMusicControl => false;
-    public override bool ShowCursor => HealthProcessor.Failed || IsPaused.Value;
+    public override bool ShowCursor => HealthProcessor.Failed || IsPaused.Value || CursorVisible;
     public override bool ApplyValuesAfterLoad => true;
     public override bool AllowExit => false;
 
     protected virtual double GameplayStartTime => 0;
     protected virtual bool InstantlyExitOnPause => false;
+    protected virtual bool AllowRestart => true;
     public virtual bool FadeBackToGlobalClock => true;
     public virtual bool SubmitScore => true;
     protected virtual bool UseGlobalOffset => true;
+    protected virtual APIUser CurrentPlayer => api.User.Value;
+
+    protected bool CursorVisible { get; set; }
 
     [Resolved]
     protected FluXisConfig Config { get; private set; }
@@ -81,7 +94,10 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
     private FluXisRealm realm { get; set; }
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private ScoreManager scores { get; set; }
+
+    [Resolved]
+    private IAPIClient api { get; set; }
 
     [Resolved]
     private NotificationManager notifications { get; set; }
@@ -96,6 +112,8 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
 
     private bool starting = true;
     private bool restarting;
+
+    public event Action OnExit;
 
     public BindableBool IsPaused { get; } = new();
     public GameplaySamples Samples { get; } = new();
@@ -115,6 +133,8 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
     public GameplayLoader Loader { get; set; }
     public Action OnRestart { get; set; }
     private ReplayRecorder replayRecorder;
+
+    public List<ScoreInfo> Scores { get; init; } = new();
 
     public MapInfo Map { get; private set; }
     public RealmMap RealmMap { get; }
@@ -154,7 +174,7 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
     protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent) => dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
 
     [BackgroundDependencyLoader]
-    private void load()
+    private void load(ExperimentConfigManager experiments)
     {
         Anchor = Anchor.Centre;
         Origin = Anchor.Centre;
@@ -199,6 +219,7 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
             HealthProcessor = CreateHealthProcessor(),
             ScoreProcessor = new ScoreProcessor
             {
+                Player = CurrentPlayer,
                 HitWindows = HitWindows,
                 Map = RealmMap,
                 MapInfo = Map,
@@ -209,20 +230,23 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
         HealthProcessor.CanFail = !Mods.Any(m => m is NoFailMod);
 
         dependencies.CacheAs(Input = GetInput());
-        dependencies.Cache(Playfield = new Playfield());
+        dependencies.Cache(Playfield = new Playfield(experiments.Get<bool>(ExperimentConfig.Seeking)));
 
         var shaders = new ShaderStackContainer();
-        var shaderTypes = MapEvents.ShaderEvents.Select(e => e.ShaderName).Distinct().ToList();
+        var shaderTypes = MapEvents.ShaderEvents.Select(e => e.Type).Distinct().ToList();
 
         foreach (var shaderType in shaderTypes)
         {
             ShaderContainer shader = shaderType switch
             {
-                "Chromatic" => new ChromaticContainer(),
-                "Greyscale" => new GreyscaleContainer(),
-                "Invert" => new InvertContainer(),
-                "Bloom" => new BloomContainer(),
-                "Mosaic" => new MosaicContainer(),
+                ShaderType.Chromatic => new ChromaticContainer(),
+                ShaderType.Greyscale => new GreyscaleContainer(),
+                ShaderType.Invert => new InvertContainer(),
+                ShaderType.Bloom => new BloomContainer(),
+                ShaderType.Mosaic => new MosaicContainer(),
+                ShaderType.Noise => new NoiseContainer(),
+                ShaderType.Vignette => new VignetteContainer(),
+                ShaderType.Retro => new RetroContainer(),
                 _ => null
             };
 
@@ -236,8 +260,12 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
             shaders.AddShader(shader);
         }
 
+        var laneSwitchManager = new LaneSwitchManager(MapEvents.LaneSwitchEvents, RealmMap.KeyCount);
+        dependencies.CacheAs(laneSwitchManager);
+
         clockContainer = new GameplayClockContainer(RealmMap, Map, new Drawable[]
         {
+            laneSwitchManager,
             new ShaderEventHandler(MapEvents.ShaderEvents, shaders),
             new FlashOverlay(MapEvents.FlashEvents.Where(e => e.InBackground).ToList()),
             new PulseEffect(),
@@ -246,10 +274,12 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
             replayRecorder = new ReplayRecorder()
         }, UseGlobalOffset);
 
-        var storyboard = Map.CreateDrawableStoryboard();
-        LoadComponent(storyboard);
+        var storyboard = Map.CreateDrawableStoryboard() ?? new DrawableStoryboard(new Storyboard(), ".");
 
         dependencies.Cache(GameplayClock = clockContainer.GameplayClock);
+
+        LoadComponent(GameplayClock);
+        LoadComponent(storyboard);
 
         InternalChildren = new Drawable[]
         {
@@ -305,6 +335,7 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
                                 new ModsDisplay()
                             }
                         },
+                        new GameplayLeaderboard(Scores, ScoreProcessor),
                         CreateTextOverlay(),
                         new DangerHealthOverlay(),
                         new DrawableStoryboardWrapper(GameplayClock, storyboard, StoryboardLayer.Overlay),
@@ -358,21 +389,28 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
         }, true);
     }
 
-    private void updateRpc() => Activity.Value = !IsPaused.Value ? GetPlayingActivity() : new UserActivity.Paused(RealmMap);
+    protected virtual void UpdatePausedState()
+    {
+        Activity.Value = !IsPaused.Value ? GetPlayingActivity() : new UserActivity.Paused(this, RealmMap);
+        AllowOverlays.Value = IsPaused.Value;
+    }
 
-    protected virtual MapInfo LoadMap() => RealmMap.GetMapInfo();
+    protected virtual MapInfo LoadMap() => RealmMap.GetMapInfo(Mods);
     protected virtual GameplayInput GetInput() => new(this, RealmMap.KeyCount);
     protected virtual Drawable CreateTextOverlay() => Empty();
-    protected virtual UserActivity GetPlayingActivity() => new UserActivity.Playing(RealmMap);
+    protected virtual UserActivity GetPlayingActivity() => new UserActivity.Playing(this, RealmMap);
 
     protected HealthProcessor CreateHealthProcessor()
     {
         var processor = null as HealthProcessor;
 
-        if (Mods.Any(m => m is HardMod)) processor = new DrainHealthProcessor();
-        else if (Mods.Any(m => m is EasyMod)) processor = new RequirementHeathProcessor { HealthRequirement = EasyMod.HEALTH_REQUIREMENT };
+        var difficulty = Map.HealthDifficulty == 0 ? 8 : Map.HealthDifficulty;
+        difficulty *= Mods.Any(m => m is HardMod) ? 1.2f : 1f;
 
-        processor ??= new HealthProcessor();
+        if (Mods.Any(m => m is HardMod)) processor = new DrainHealthProcessor(difficulty);
+        else if (Mods.Any(m => m is EasyMod)) processor = new RequirementHeathProcessor(difficulty) { HealthRequirement = EasyMod.HEALTH_REQUIREMENT };
+
+        processor ??= new HealthProcessor(difficulty);
         processor.Screen = this;
         processor.OnFail = OnDeath;
 
@@ -429,68 +467,68 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
             ScoreProcessor.Recalculate();
         }
 
-        if (ScoreProcessor.FullCombo || ScoreProcessor.FullFlawless)
-            fcOverlay.Show(ScoreProcessor.FullFlawless ? FullComboOverlay.FullComboType.AllFlawless : FullComboOverlay.FullComboType.FullCombo);
+        replayRecorder.IsRecording.Value = false;
 
-        keybindContainer.Delay(FADE_DURATION).FadeOut(FADE_DURATION);
-        if (SubmitScore) scoreSubmissionOverlay.FadeIn(FADE_DURATION);
+        var showingOverlay = ScoreProcessor.FullCombo || ScoreProcessor.FullFlawless;
+
+        var stopwatch = Stopwatch.StartNew();
+
+        if (showingOverlay)
+        {
+            fcOverlay.Show(ScoreProcessor.FullFlawless ? FullComboOverlay.FullComboType.AllFlawless : FullComboOverlay.FullComboType.FullCombo);
+            Scheduler.AddDelayed(() => fcOverlay.Hide(), 1400);
+        }
+
+        var canBeUploaded = Mods.All(m => m.Rankable) && RealmMap.StatusInt < 100 && !RealmMap.MapSet.AutoImported;
+
+        if (SubmitScore && canBeUploaded)
+            scoreSubmissionOverlay.FadeIn(FADE_DURATION);
 
         Task.Run(() =>
         {
-            var player = fluxel.LoggedInUser;
+            var bestScore = scores.GetCurrentTop(RealmMap.ID);
 
-            var bestScore = realm.Run(r =>
-            {
-                var onMap = r.All<RealmScore>().Where(s => s.MapID == RealmMap.ID).ToList();
-                var best = onMap.MaxBy(s => s.Score);
-                return best.Detach();
-            });
-
-            var score = ScoreProcessor.ToScoreInfo(player);
+            var score = ScoreProcessor.ToScoreInfo();
             score.ScrollSpeed = Config.Get<float>(FluXisSetting.ScrollSpeed);
 
-            var screen = new SoloResults(RealmMap, score, player);
+            var screen = new SoloResults(RealmMap, score, CurrentPlayer);
             screen.OnRestart = OnRestart;
             if (bestScore != null) screen.ComparisonScore = bestScore.ToScoreInfo();
 
-            if (Mods.All(m => m.SaveScore) && SubmitScore && RealmMap.StatusInt < 100)
+            if (Mods.All(m => m.SaveScore) && SubmitScore && !RealmMap.MapSet.AutoImported)
             {
-                var scoreId = realm.RunWrite(r =>
-                {
-                    var rScore = r.Add(RealmScore.FromScoreInfo(RealmMap, score));
-                    score.Replay = SaveReplay(rScore.ID);
-                    return rScore.ID;
-                });
+                var id = scores.Add(RealmMap.ID, score).ID;
+                score.Replay = SaveReplay(id);
 
-                if (Mods.All(m => m.Rankable))
+                if (canBeUploaded)
                 {
                     var request = new ScoreSubmitRequest(score);
                     screen.SubmitRequest = request;
-                    request.Perform(fluxel);
+                    api.PerformRequest(request);
 
-                    if (request.Response.Success && request.Response.Data.ID != 0)
-                    {
-                        realm.RunWrite(r =>
-                        {
-                            var rScore = r.Find<RealmScore>(scoreId);
-                            rScore.OnlineID = request.Response.Data.ID;
-                        });
-                    }
+                    var resData = request.Response?.Data;
+
+                    if (request.IsSuccessful && resData?.Score != null)
+                        scores.UpdateOnlineID(id, resData.Score.ID);
 
                     Schedule(() => scoreSubmissionOverlay.FadeOut(FADE_DURATION));
                 }
             }
 
-            Schedule(() => this.Delay(600).FadeOut(FADE_DURATION).OnComplete(_ => this.Push(screen)));
+            var minDelay = showingOverlay ? 2400 : 400;
+            var elapsed = stopwatch.Elapsed.TotalMilliseconds;
+
+            var delay = Math.Max(200, minDelay - elapsed);
+            Schedule(() => this.Delay(delay).FadeOut(FADE_DURATION).OnComplete(_ => this.Push(screen)));
         });
     }
 
-    protected Shared.Replays.Replay SaveReplay(Guid scoreID)
+    protected Replay SaveReplay(Guid scoreID)
     {
         try
         {
             var replay = replayRecorder.Replay;
-            replay.PlayerID = fluxel.LoggedInUser?.ID ?? -1;
+            replay.PlayerID = api.User.Value?.ID ?? -1;
             var folder = storage.GetFullPath("replays");
 
             if (!Directory.Exists(folder))
@@ -512,6 +550,8 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
 
     public virtual void RestartMap()
     {
+        if (restarting || !AllowRestart) return;
+
         restarting = true;
         Samples.Restart();
         OnRestart?.Invoke();
@@ -528,7 +568,7 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
 
         if (FadeBackToGlobalClock)
         {
-            globalClock.RateTo(GameplayClock.Rate, 0);
+            globalClock.RateTo(GameplayClock.Rate);
             ScheduleAfterChildren(() =>
             {
                 globalClock.Seek(GameplayClock.CurrentTime);
@@ -536,7 +576,7 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
             });
         }
 
-        globalClock.LowPassFilter.CutoffTo(LowPassFilter.MAX, MOVE_DURATION);
+        OnExit?.Invoke();
         GameplayClock.Stop();
         Samples.CancelFail();
 
@@ -560,7 +600,7 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
             });
         }
 
-        IsPaused.BindValueChanged(_ => updateRpc(), true);
+        IsPaused.BindValueChanged(_ => UpdatePausedState(), true);
 
         this.ScaleTo(1.2f).FadeOut();
 
@@ -576,7 +616,7 @@ public partial class GameplayScreen : FluXisScreen, IKeyBindingHandler<FluXisGlo
 
         switch (e.Action)
         {
-            case FluXisGlobalKeybind.QuickRestart when !starting && !restarting:
+            case FluXisGlobalKeybind.QuickRestart when !starting && !restarting && AllowRestart:
                 quickActionOverlay.OnConfirm = RestartMap;
                 quickActionOverlay.IsHolding = true;
                 return true;

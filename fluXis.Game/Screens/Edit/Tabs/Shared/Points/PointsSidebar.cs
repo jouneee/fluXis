@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using fluXis.Game.Graphics.Containers;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Input;
-using fluXis.Game.Map.Structures;
+using fluXis.Game.Map.Structures.Bases;
+using fluXis.Game.Screens.Edit.Input;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.List;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
@@ -16,12 +17,13 @@ using osuTK.Input;
 
 namespace fluXis.Game.Screens.Edit.Tabs.Shared.Points;
 
-public abstract partial class PointsSidebar : ExpandingContainer, IKeyBindingHandler<FluXisGlobalKeybind>
+public abstract partial class PointsSidebar : ExpandingContainer, IKeyBindingHandler<FluXisGlobalKeybind>, IKeyBindingHandler<EditorKeybinding>
 {
     private const int size_closed = 190;
     private const int size_open = 420;
 
-    protected override double HoverDelay => 500;
+    protected override double HoverDelay => 250;
+    protected override bool CloseOnHoverLost => false;
 
     public Action OnWrapperClick { get; set; }
 
@@ -173,5 +175,22 @@ public abstract partial class PointsSidebar : ExpandingContainer, IKeyBindingHan
         return true;
     }
 
+    public bool OnPressed(KeyBindingPressEvent<EditorKeybinding> e)
+    {
+        if (e.Action == EditorKeybinding.ToggleSidebar)
+        {
+            if (showingSettings)
+                return false;
+
+            if (Expanded.Value)
+                close();
+            else
+                Expanded.Value = true;
+        }
+
+        return false;
+    }
+
+    public void OnReleased(KeyBindingReleaseEvent<EditorKeybinding> e) { }
     public void OnReleased(KeyBindingReleaseEvent<FluXisGlobalKeybind> e) { }
 }

@@ -1,5 +1,9 @@
 using System;
+using System.Linq;
 using fluXis.Game.Audio;
+using fluXis.Game.Database.Maps;
+using fluXis.Game.Map;
+using fluXis.Game.Online.Fluxel;
 using osu.Framework.Allocation;
 using osu.Framework.Testing;
 
@@ -9,6 +13,9 @@ public partial class FluXisTestScene : TestScene
 {
     protected DependencyContainer TestDependencies { get; private set; }
     protected GlobalClock GlobalClock => TestDependencies.Get<GlobalClock>();
+
+    protected TestAPIClient TestAPI => TestDependencies.Get<IAPIClient>() as TestAPIClient;
+    protected virtual bool UseTestAPI => false;
 
     protected void CreateClock()
     {
@@ -21,10 +28,31 @@ public partial class FluXisTestScene : TestScene
     protected void CreateDummyBeatSync() => TestDependencies.CacheAs<IBeatSyncProvider>(new DummyBeatSyncProvider());
     protected void CreateDummyAmplitude() => TestDependencies.CacheAs<IAmplitudeProvider>(new DummyAmplitudeProvider());
 
+    protected virtual RealmMap GetTestMap(MapStore maps)
+    {
+        var set = maps.GetFromGuid(Program.TestSetID);
+
+        if (set is null)
+            return null;
+
+        var id = Program.TestMapID;
+
+        return string.IsNullOrEmpty(id)
+            ? set.Maps.FirstOrDefault()
+            : set.Maps.FirstOrDefault(m => m.ID == Guid.Parse(Program.TestMapID));
+    }
+
     protected override ITestSceneTestRunner CreateRunner() => new FluXisTestSceneTestRunner();
 
     protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
-        => TestDependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+    {
+        TestDependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+
+        if (UseTestAPI)
+            TestDependencies.CacheAs<IAPIClient>(new TestAPIClient());
+
+        return TestDependencies;
+    }
 
     private partial class FluXisTestSceneTestRunner : FluXisGameBase, ITestSceneTestRunner
     {

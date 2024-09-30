@@ -64,7 +64,7 @@ public partial class AudioDeviceSection : SettingsSubSection
     {
         protected override Dropdown<string> CreateMenu() => new AudioDropdownMenu();
 
-        private partial class AudioDropdownMenu : SettingsDropdownMenu
+        private partial class AudioDropdownMenu : CustomDropdown
         {
             protected override LocalisableString GenerateItemText(string item)
                 => string.IsNullOrEmpty(item) ? "Default" : base.GenerateItemText(item);

@@ -9,12 +9,14 @@ using fluXis.Game.Graphics.UserInterface.Text;
 using fluXis.Game.Localization;
 using fluXis.Game.Map;
 using fluXis.Game.Online.Fluxel;
-using fluXis.Game.Overlay.Login;
+using fluXis.Game.Overlay.Auth;
+using fluXis.Game.Overlay.Network;
 using fluXis.Game.Overlay.Settings;
 using fluXis.Game.Overlay.Toolbar;
 using fluXis.Game.Screens.Browse;
 using fluXis.Game.Screens.Edit;
 using fluXis.Game.Screens.Menu.UI;
+using fluXis.Game.Screens.Menu.UI.Buttons;
 using fluXis.Game.Screens.Menu.UI.NowPlaying;
 using fluXis.Game.Screens.Menu.UI.Snow;
 using fluXis.Game.Screens.Menu.UI.Updates;
@@ -23,14 +25,18 @@ using fluXis.Game.Screens.Multiplayer;
 using fluXis.Game.Screens.Ranking;
 using fluXis.Game.Screens.Select;
 using fluXis.Game.UI;
+using fluXis.Game.Utils.Extensions;
+using fluXis.Shared.Components.Users;
 using osu.Framework.Allocation;
-using osu.Framework.Audio.Sample;
+using osu.Framework.Audio;
 using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Graphics.Textures;
+using osu.Framework.Input;
 using osu.Framework.Input.Events;
 using osu.Framework.Platform;
 using osu.Framework.Screens;
@@ -62,13 +68,16 @@ public partial class MenuScreen : FluXisScreen
     private GlobalClock clock { get; set; }
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     [Resolved]
     private FluXisConfig config { get; set; }
 
     [Resolved]
     private Toolbar toolbar { get; set; }
+
+    [Resolved]
+    private Dashboard dashboard { get; set; }
 
     [Resolved]
     private PanelContainer panels { get; set; }
@@ -85,26 +94,27 @@ public partial class MenuScreen : FluXisScreen
     private Bindable<bool> forceSnow;
 
     private Container textContainer;
-    private Container buttonContainer;
+    private Container buttons;
     private FillFlowContainer linkContainer;
     private MenuUpdates updates;
 
     private Sprite logoText;
     private CircularContainer animationCircle;
 
-    private MenuPlayButton playButton;
+    private MenuImageButton playButton;
+    private double mapChangeTime;
     private int mapCount;
 
-    private MenuButton multiButton;
-    private MenuButton rankingButton;
-    private MenuButton browseButton;
+    private MenuImageButton multiButton;
+    private MenuLongButton dashboardButton;
+    private MenuLongButton browseButton;
 
     private bool pressedStart;
     private double inactivityTime;
     private const double inactivity_timeout = 60 * 1000;
 
     [BackgroundDependencyLoader]
-    private void load(GameHost host, ISampleStore samples, TextureStore textures)
+    private void load(GameHost host, TextureStore textures)
     {
         forceSnow = config.GetBindable<bool>(FluXisSetting.ForceSnow);
 
@@ -125,26 +135,142 @@ public partial class MenuScreen : FluXisScreen
                 Padding = new MarginPadding(40),
                 Children = new Drawable[]
                 {
-                    textContainer = new Container
+                    new GridContainer
                     {
                         RelativeSizeAxes = Axes.Both,
-                        Alpha = 0,
-                        Children = new Drawable[]
+                        ColumnDimensions = new[] { new Dimension(), },
+                        RowDimensions = new Dimension[]
                         {
-                            new FluXisSpriteText
+                            new(), // title/splash
+                            new(GridSizeMode.AutoSize), // buttons
+                            new() // empty
+                        },
+                        Content = new[]
+                        {
+                            new Drawable[]
                             {
-                                Text = "fluXis",
-                                FontSize = 100,
-                                Shadow = true,
-                                ShadowOffset = new Vector2(0, 0.04f)
+                                textContainer = new Container
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    Alpha = 0,
+                                    Y = -50,
+                                    Children = new Drawable[]
+                                    {
+                                        logoText = new Sprite
+                                        {
+                                            Texture = textures.Get("Logos/logo-text-shadow"),
+                                            Scale = new Vector2(.5f),
+                                            Anchor = Anchor.TopCentre,
+                                            Origin = Anchor.TopCentre
+                                        },
+                                        splashText = new FluXisTextFlow
+                                        {
+                                            Width = 1280,
+                                            AutoSizeAxes = Axes.Y,
+                                            Anchor = Anchor.TopCentre,
+                                            Origin = Anchor.TopCentre,
+                                            FontSize = FluXisSpriteText.GetWebFontSize(24),
+                                            TextAnchor = Anchor.TopCentre,
+                                            Margin = new MarginPadding { Top = 88 },
+                                            Shadow = true
+                                        }
+                                    }
+                                }
                             },
-                            splashText = new FluXisTextFlow
+                            new Drawable[]
                             {
-                                FontSize = 32,
-                                RelativeSizeAxes = Axes.X,
-                                Margin = new MarginPadding { Top = 80 },
-                                Shadow = true
-                            }
+                                buttons = new Container
+                                {
+                                    AutoSizeAxes = Axes.Both,
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    Shear = new Vector2(MenuButtonBase.SHEAR_AMOUNT, 0),
+                                    Children = new Drawable[]
+                                    {
+                                        playButton = new MenuImageButton
+                                        {
+                                            Text = LocalizationStrings.MainMenu.PlayText,
+                                            Icon = FontAwesome6.Solid.Play,
+                                            Keys = new[] { Key.Enter, Key.P },
+                                            GamepadButton = JoystickButton.Button2, // A
+                                            Action = continueToPlay,
+                                            Size = new Vector2(350, 200)
+                                        },
+                                        multiButton = new MenuImageButton
+                                        {
+                                            Text = LocalizationStrings.MainMenu.MultiplayerText,
+                                            Description = LocalizationStrings.MainMenu.MultiplayerDescription,
+                                            Icon = FontAwesome6.Solid.Users,
+                                            Keys = new[] { Key.M },
+                                            GamepadButton = JoystickButton.Button3, // B
+                                            Action = continueToMultiplayer,
+                                            DefaultSprite = new Sprite
+                                            {
+                                                Size = new Vector2(1),
+                                                Texture = textures.Get("Multiplayer/button-lobby")
+                                            },
+                                            Size = new Vector2(260, 200),
+                                            Position = new Vector2(370, 0),
+                                            Column = 2
+                                        },
+                                        new MenuImageButton
+                                        {
+                                            Text = LocalizationStrings.MainMenu.EditText,
+                                            Description = LocalizationStrings.MainMenu.EditDescription,
+                                            Icon = FontAwesome6.Solid.PenRuler,
+                                            Keys = new[] { Key.E },
+                                            Action = () => this.Push(new EditorLoader()),
+                                            DefaultSprite = new Sprite
+                                            {
+                                                Size = new Vector2(1),
+                                                Texture = textures.Get("menu-edit")
+                                            },
+                                            Size = new Vector2(260, 200),
+                                            Position = new Vector2(650, 0),
+                                            Column = 3
+                                        },
+                                        dashboardButton = new MenuLongButton
+                                        {
+                                            Text = LocalizationStrings.MainMenu.DashboardText,
+                                            Description = LocalizationStrings.MainMenu.DashboardDescription,
+                                            Icon = FontAwesome6.Solid.ChartLine,
+                                            Keys = new[] { Key.D },
+                                            GamepadButton = JoystickButton.Button1, // X
+                                            Action = openDashboard,
+                                            Size = new Vector2(385, 80),
+                                            Position = new Vector2(0, 220),
+                                            Row = 2
+                                        },
+                                        browseButton = new MenuLongButton
+                                        {
+                                            Text = LocalizationStrings.MainMenu.BrowseText,
+                                            Description = LocalizationStrings.MainMenu.BrowseDescription,
+                                            Icon = FontAwesome6.Solid.EarthAmericas,
+                                            GamepadButton = JoystickButton.Button4, // Y
+                                            Keys = new[] { Key.B },
+                                            Action = continueToBrowse,
+                                            Size = new Vector2(385, 80),
+                                            Position = new Vector2(405, 220),
+                                            Row = 2,
+                                            Column = 2
+                                        },
+                                        new MenuSmallButton
+                                        {
+                                            Icon = FontAwesome6.Solid.DoorOpen,
+                                            Action = Game.Exit,
+                                            GamepadButton = JoystickButton.Button9, // Back
+                                            Size = new Vector2(100, 80),
+                                            Position = new Vector2(810, 220),
+                                            Row = 2,
+                                            Column = 3
+                                        }
+                                    }
+                                }
+                            },
+                            new[] { Empty() }
                         }
                     },
                     new Container
@@ -158,7 +284,7 @@ public partial class MenuScreen : FluXisScreen
                                 Origin = Anchor.Centre,
                                 Masking = true,
                                 BorderColour = Color4.White,
-                                BorderThickness = 20,
+                                BorderThickness = 60,
                                 Children = new Drawable[]
                                 {
                                     new Box
@@ -179,121 +305,41 @@ public partial class MenuScreen : FluXisScreen
                     },
                     pressAnyKeyText = new FluXisSpriteText
                     {
-                        Text = "Press any key.",
+                        Text = LocalizationStrings.MainMenu.PressAnyKey,
                         FontSize = 32,
                         Shadow = true,
                         Anchor = Anchor.BottomCentre,
                         Origin = Anchor.BottomCentre
                     },
                     new MenuNowPlaying(),
-                    buttonContainer = new Container
-                    {
-                        AutoSizeAxes = Axes.Both,
-                        Anchor = Anchor.BottomLeft,
-                        Origin = Anchor.BottomLeft,
-                        Alpha = 0,
-                        Shear = new Vector2(-.2f, 0),
-                        Margin = new MarginPadding { Left = 40 },
-                        X = -200,
-                        Children = new Drawable[]
-                        {
-                            new MenuButtonBackground { Y = 30 },
-                            new MenuButtonBackground { Y = 110 },
-                            new MenuButtonBackground { Y = 190 },
-                            playButton = new MenuPlayButton
-                            {
-                                Description = LocalizationStrings.MainMenu.PlayDescription(mapCount),
-                                Action = continueToPlay,
-                                Width = 700
-                            },
-                            new SmallMenuButton
-                            {
-                                Icon = FontAwesome6.Solid.Gear,
-                                Action = settings.ToggleVisibility,
-                                Width = 90,
-                                Y = 80
-                            },
-                            multiButton = new MenuButton
-                            {
-                                Text = LocalizationStrings.MainMenu.MultiplayerText,
-                                Description = LocalizationStrings.MainMenu.MultiplayerDescription,
-                                Icon = FontAwesome6.Solid.Users,
-                                Action = continueToMultiplayer,
-                                Width = 290,
-                                X = 110,
-                                Y = 80
-                            },
-                            rankingButton = new MenuButton
-                            {
-                                Text = LocalizationStrings.MainMenu.RankingText,
-                                Description = LocalizationStrings.MainMenu.RankingDescription,
-                                Icon = FontAwesome6.Solid.Trophy,
-                                Action = continueToRankings,
-                                Width = 280,
-                                X = 420,
-                                Y = 80
-                            },
-                            new SmallMenuButton
-                            {
-                                Icon = FontAwesome6.Solid.XMark,
-                                Action = Game.Exit,
-                                Width = 90,
-                                Y = 160
-                            },
-                            browseButton = new MenuButton
-                            {
-                                Text = LocalizationStrings.MainMenu.BrowseText,
-                                Description = LocalizationStrings.MainMenu.BrowseDescription,
-                                Icon = FontAwesome6.Solid.Download,
-                                Width = 330,
-                                X = 110,
-                                Y = 160,
-                                Action = continueToBrowse
-                            },
-                            new MenuButton
-                            {
-                                Text = LocalizationStrings.MainMenu.EditText,
-                                Description = LocalizationStrings.MainMenu.EditDescription,
-                                Icon = FontAwesome6.Solid.Pen,
-                                Action = () => this.Push(new EditorLoader()),
-                                Width = 240,
-                                X = 460,
-                                Y = 160
-                            }
-                        }
-                    },
-                    new MenuGamepadTooltips
-                    {
-                        ButtonContainer = buttonContainer
-                    },
                     updates = new MenuUpdates { X = 200 },
                     linkContainer = new FillFlowContainer
                     {
                         AutoSizeAxes = Axes.Both,
-                        Anchor = Anchor.BottomRight,
-                        Origin = Anchor.BottomRight,
+                        Anchor = Anchor.BottomLeft,
+                        Origin = Anchor.BottomLeft,
                         Direction = FillDirection.Horizontal,
                         Spacing = new Vector2(10),
                         Alpha = 0,
-                        X = 200,
+                        X = -200,
                         Children = new Drawable[]
                         {
-                            new MenuIconButton
+                            new MenuLinkButton
                             {
                                 Icon = FontAwesome6.Brands.Discord,
                                 Action = () => host.OpenUrlExternally("https://discord.gg/29hMftpNq9"),
                                 Text = "Discord"
                             },
-                            new MenuIconButton
+                            new MenuLinkButton
                             {
                                 Icon = FontAwesome6.Brands.GitHub,
-                                Action = () => host.OpenUrlExternally("https://github.com/TeamFluXis/fluXis"),
+                                Action = () => host.OpenUrlExternally("https://github.com/InventiveRhythm/fluXis"),
                                 Text = "GitHub"
                             },
-                            new MenuIconButton
+                            new MenuLinkButton
                             {
                                 Icon = FontAwesome6.Solid.EarthAmericas,
-                                Action = () => host.OpenUrlExternally(fluxel.Endpoint.WebsiteRootUrl),
+                                Action = () => host.OpenUrlExternally(api.Endpoint.WebsiteRootUrl),
                                 Text = "Website"
                             }
                         }
@@ -323,24 +369,27 @@ public partial class MenuScreen : FluXisScreen
             snowContainer.FadeTo(shouldSnow ? 1 : 0, 600, Easing.OutQuint);
         });
 
-        updateButtons();
-        fluxel.OnUserChanged += _ => Schedule(updateButtons);
+        api.User.BindValueChanged(updateButtons, true);
     }
 
-    private void updateButtons()
+    private void updateButtons(ValueChangedEvent<APIUser> e)
     {
-        var enabled = fluxel.LoggedInUser != null;
-        multiButton.Enabled.Value = enabled;
-        rankingButton.Enabled.Value = enabled;
-        browseButton.Enabled.Value = enabled;
+        Scheduler.ScheduleIfNeeded(() =>
+        {
+            var enabled = e.NewValue != null;
+            multiButton.Enabled.Value = enabled;
+            dashboardButton.Enabled.Value = enabled;
+            browseButton.Enabled.Value = enabled;
+        });
     }
 
     private void continueToPlay() => this.Push(new SelectScreen());
     private void continueToMultiplayer() => this.Push(new MultiplayerScreen());
     private void continueToRankings() => this.Push(new Rankings());
+    private void openDashboard() => dashboard.Show();
     private void continueToBrowse() => this.Push(new MapBrowser());
 
-    private bool canPlayAnimation()
+    public bool CanPlayAnimation()
     {
         if (pressedStart) return false;
 
@@ -356,13 +405,14 @@ public partial class MenuScreen : FluXisScreen
         randomizeSplash();
         backgrounds.Zoom = 1f;
 
-        logoText.ScaleTo(1.1f, 800, Easing.OutQuint).FadeOut(600);
-        animationCircle.TransformTo(nameof(animationCircle.BorderThickness), 20f).ResizeTo(0)
-                       .TransformTo(nameof(animationCircle.BorderThickness), 0f, 1200, Easing.OutQuint).ResizeTo(400, 1000, Easing.OutQuint);
+        logoText.ScaleTo(1.1f, 1000, Easing.OutQuint).FadeOut(600);
+        animationCircle.BorderTo(60f).ResizeTo(0)
+                       .BorderTo(0f, 1200, Easing.OutQuint)
+                       .ResizeTo(400, 1000, Easing.OutQuint);
 
         this.Delay(800).FadeIn().OnComplete(_ =>
         {
-            toolbar.ShowToolbar.Value = true;
+            toolbar.Show();
             showMenu(true);
             login.Show();
         });
@@ -372,7 +422,7 @@ public partial class MenuScreen : FluXisScreen
 
     private void revertStartAnimation()
     {
-        toolbar.ShowToolbar.Value = false;
+        toolbar.Hide();
         backgrounds.Zoom = 1.2f;
         hideMenu();
 
@@ -391,16 +441,30 @@ public partial class MenuScreen : FluXisScreen
             return true;
         }
 
-        return canPlayAnimation();
+        return CanPlayAnimation();
     }
 
-    protected override bool OnMouseDown(MouseDownEvent e) => canPlayAnimation();
-    protected override bool OnTouchDown(TouchDownEvent e) => canPlayAnimation();
-    protected override bool OnMidiDown(MidiDownEvent e) => canPlayAnimation();
+    protected override bool OnMouseDown(MouseDownEvent e) => CanPlayAnimation();
+    protected override bool OnTouchDown(TouchDownEvent e) => CanPlayAnimation();
+    protected override bool OnMidiDown(MidiDownEvent e) => CanPlayAnimation();
+
+    protected override bool OnJoystickPress(JoystickPressEvent e)
+    {
+        if (CanPlayAnimation()) return true;
+
+        switch (e.Button)
+        {
+            case JoystickButton.Button10: // Start
+                settings.ToggleVisibility();
+                return true;
+        }
+
+        return false;
+    }
 
     private void showMenu(bool longer = false)
     {
-        // we dont need the delay
+        // we don't need the delay
         var delay = longer ? 0 : ENTER_DELAY;
 
         using (BeginDelayedSequence(delay))
@@ -408,9 +472,9 @@ public partial class MenuScreen : FluXisScreen
             var moveDuration = longer ? 1000 : MOVE_DURATION;
             var fadeDuration = longer ? 800 : FADE_DURATION;
 
-            textContainer.MoveToX(0, moveDuration, Easing.OutQuint).FadeIn(fadeDuration);
-            buttonContainer.MoveToX(0, moveDuration, Easing.OutQuint).FadeIn(fadeDuration);
-            // linkContainer.MoveToX(0, moveDuration, Easing.OutQuint).FadeIn(fadeDuration);
+            textContainer.MoveToY(0, moveDuration, Easing.OutQuint).FadeIn(fadeDuration);
+            buttons.ForEach(b => b.Show());
+            linkContainer.MoveToX(0, moveDuration, Easing.OutQuint).FadeIn(fadeDuration);
 
             updates.CanShow = true;
             updates.Show(moveDuration, fadeDuration);
@@ -419,9 +483,9 @@ public partial class MenuScreen : FluXisScreen
 
     private void hideMenu()
     {
-        textContainer.MoveToX(-100, MOVE_DURATION, Easing.OutQuint).FadeOut(FADE_DURATION);
-        buttonContainer.MoveToX(-100, MOVE_DURATION, Easing.OutQuint).FadeOut(FADE_DURATION);
-        // linkContainer.MoveToX(200, duration, Easing.OutQuint).FadeOut(duration / 2f);
+        textContainer.MoveToY(-50, MOVE_DURATION, Easing.OutQuint).FadeOut(FADE_DURATION);
+        buttons.ForEach(b => b.Hide());
+        linkContainer.MoveToX(-200, MOVE_DURATION, Easing.OutQuint).FadeOut(FADE_DURATION);
 
         updates.CanShow = false;
         updates.Hide();
@@ -433,26 +497,21 @@ public partial class MenuScreen : FluXisScreen
     {
         if (config.Get<bool>(FluXisSetting.IntroTheme))
         {
-            maps.CurrentMap = maps.CreateBuiltinMap(MapStore.BuiltinMap.Roundhouse).LowestDifficulty;
-
-            // this doesnt loop perfectly and i hate it and can't do anything about it
-            clock.RestartPoint = maps.CurrentMap?.Metadata.PreviewTime ?? 0;
-            clock.AllowLimitedLoop = false;
+            maps.CurrentMap = maps.CreateBuiltinMap(Game.CurrentSeason == Season.Halloween ? MapStore.BuiltinMap.Spoophouse : MapStore.BuiltinMap.Roundhouse).LowestDifficulty;
             clock.Seek(0);
         }
-        else // if diabled, load a random map
+        else // if disabled, load a random map
             maps.CurrentMap = maps.GetRandom()?.Maps.FirstOrDefault() ?? MapStore.CreateDummyMap();
 
         clock.Stop();
-        clock.Volume = 0;
+        clock.VolumeTo(0);
 
         backgrounds.AddBackgroundFromMap(maps.CurrentMapSet?.Maps.First());
     }
 
     public override void OnEntering(ScreenTransitionEvent e)
     {
-        clock.FadeIn(500);
-
+        clock.VolumeTo(0).VolumeTo(1, 500);
         clock.Start();
 
         if (config.Get<bool>(FluXisSetting.IntroTheme))
@@ -483,16 +542,39 @@ public partial class MenuScreen : FluXisScreen
         inactivityTime = 0;
     }
 
+    protected override bool OnMouseMove(MouseMoveEvent e)
+    {
+        inactivityTime = 0;
+        return false;
+    }
+
     protected override void Update()
     {
         playButton.Description = LocalizationStrings.MainMenu.PlayDescription(mapCount);
 
-        inactivityTime += Time.Elapsed;
+        if (!Game.AnyOverlayOpen)
+            inactivityTime += Time.Elapsed;
 
         if (inactivityTime > inactivity_timeout && pressedStart)
         {
             inactivityTime = 0;
             revertStartAnimation();
+        }
+
+        if (playButton.IsVisible)
+            mapChangeTime -= Time.Elapsed;
+
+        if (mapChangeTime <= 0)
+        {
+            mapChangeTime = 5000;
+
+            var map = maps.GetRandom()?.Maps.FirstOrDefault() ?? MapStore.CreateDummyMap();
+
+            LoadComponentAsync(new BlurableBackground(map, .2f), b =>
+            {
+                playButton.Stack.AutoFill = false;
+                playButton.Stack.Add(b);
+            });
         }
     }
 }

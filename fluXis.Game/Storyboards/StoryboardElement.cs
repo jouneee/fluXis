@@ -1,11 +1,12 @@
 using System.Collections.Generic;
+using fluXis.Game.Map.Structures.Bases;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using osu.Framework.Graphics;
 
 namespace fluXis.Game.Storyboards;
 
-public class StoryboardElement
+public class StoryboardElement : ITimedObject
 {
     /// <summary>
     /// The type of the element.
@@ -65,13 +66,32 @@ public class StoryboardElement
 
     [JsonProperty("animations")]
     public List<StoryboardAnimation> Animations { get; set; } = new();
+
+    [JsonIgnore]
+    double ITimedObject.Time { get => StartTime; set => StartTime = value; }
+
+    public T GetParameter<T>(string key, T fallback)
+    {
+        if (!Parameters.TryGetValue(key, out var token))
+            return fallback;
+
+        try
+        {
+            return token.ToObject<T>() ?? fallback;
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
 }
 
 public enum StoryboardElementType
 {
     Box = 0,
     Sprite = 1,
-    Text = 2
+    Text = 2,
+    Script = 3
 }
 
 public enum StoryboardLayer

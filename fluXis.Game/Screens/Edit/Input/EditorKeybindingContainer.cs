@@ -25,7 +25,9 @@ public partial class EditorKeybindingContainer : RealmKeyBindingContainer<Editor
         new(new KeyCombination(InputKey.Control, InputKey.Shift, InputKey.O), EditorKeybinding.OpenFolder),
         new(new KeyCombination(InputKey.Control, InputKey.Z), EditorKeybinding.Undo),
         new(new KeyCombination(InputKey.Control, InputKey.Y), EditorKeybinding.Redo),
-        new(new KeyCombination(InputKey.Control, InputKey.F), EditorKeybinding.FlipSelection)
+        new(new KeyCombination(InputKey.Control, InputKey.F), EditorKeybinding.FlipSelection),
+        new(new KeyCombination(InputKey.Control, InputKey.Q), EditorKeybinding.ShuffleSelection),
+        new(new KeyCombination(InputKey.Tab), EditorKeybinding.ToggleSidebar)
     };
 
     public bool OnPressed(KeyBindingPressEvent<EditorKeybinding> e) => parent?.OnPressed(e) ?? false;
@@ -39,5 +41,7 @@ public enum EditorKeybinding
     OpenFolder,
     Undo,
     Redo,
-    FlipSelection
+    FlipSelection,
+    ShuffleSelection,
+    ToggleSidebar
 }

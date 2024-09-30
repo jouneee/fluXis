@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using System.Linq;
 using fluXis.Game.Map;
@@ -9,7 +8,9 @@ using fluXis.Import.osu.Storyboards;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Input.Events;
 using osuTK;
+using osuTK.Input;
 
 namespace fluXis.Game.Tests.Storyboards;
 
@@ -28,17 +29,20 @@ public partial class TestStoryboard : FluXisTestScene
 
         Add(GlobalClock);
 
-        var set = maps.GetFromGuid("e73344a8-9897-4149-b69a-71e03c5146af");
-        var map = set.Maps.First(m => m.ID == Guid.Parse("adf5a2a9-df58-4558-92cf-c8fb0dd25cb0"));
-        GlobalClock.LoadMap(map);
-        GlobalClock.Stop();
+        var set = maps.MapSets.FirstOrDefault(s => s.Metadata.Title == "My Love" && s.Metadata.Artist == "Raphlesia & BilliumMoto");
 
-        var data = File.ReadAllText(@"C:\Users\Flux\AppData\Roaming\osu\exports\neppa\Tephe - Neppa feat. Butter (Jiysea).osb");
+        if (set is not null)
+        {
+            GlobalClock.LoadMap(set.LowestDifficulty);
+            GlobalClock.Stop();
+        }
+
+        var data = File.ReadAllText(@"W:\osu-lazer\exports\mylove\Raphlesia & BilliumMoto - My Love (Mao).osb");
 
         var parser = new OsuStoryboardParser();
         var storyboard = parser.Parse(data);
 
-        var drawable = new DrawableStoryboard(storyboard, @"C:\Users\Flux\AppData\Roaming\osu\exports\neppa\");
+        var drawable = new DrawableStoryboard(storyboard, @"W:\osu-lazer\exports\mylove\");
         LoadComponent(drawable);
 
         Add(new Container
@@ -58,5 +62,21 @@ public partial class TestStoryboard : FluXisTestScene
 
         AddStep("Stop", GlobalClock.Stop);
         AddStep("Start", GlobalClock.Start);
+    }
+
+    protected override bool OnKeyDown(KeyDownEvent e)
+    {
+        switch (e.Key)
+        {
+            case Key.Left:
+                GlobalClock.Seek(GlobalClock.CurrentTime - 2000);
+                return true;
+
+            case Key.Right:
+                GlobalClock.Seek(GlobalClock.CurrentTime + 2000);
+                return true;
+        }
+
+        return false;
     }
 }

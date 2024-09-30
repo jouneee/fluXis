@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using fluXis.Game.Map;
+using fluXis.Game.Mods;
 using fluXis.Game.Utils;
 using fluXis.Shared.Utils;
 using JetBrains.Annotations;
@@ -37,7 +39,7 @@ public class RealmMap : RealmObject
     public MapStatus Status { set => StatusInt = (int)value; }
 
     public string FileName { get; set; } = string.Empty;
-    public int OnlineID { get; set; } = -1;
+    public long OnlineID { get; set; } = -1;
     public RealmMapFilters Filters { get; set; } = null!;
     public int KeyCount { get; set; } = 4;
     public float Rating { get; set; }
@@ -46,7 +48,10 @@ public class RealmMap : RealmObject
     public string OnlineHash { get; set; } = string.Empty;
 
     [Ignored]
-    public bool UpToDate => Hash == OnlineHash;
+    public Action OnlineHashUpdated { get; set; }
+
+    [Ignored]
+    public bool UpToDate => string.IsNullOrEmpty(OnlineHash) || Hash == OnlineHash;
 
     public float AccuracyDifficulty { get; set; } = 8;
     public float HealthDifficulty { get; set; } = 8;
@@ -66,7 +71,7 @@ public class RealmMap : RealmObject
     {
     }
 
-    public override string ToString() => $"{ID} - {Metadata}";
+    public override string ToString() => $"{ID} - {Hash} - {Metadata}";
 
     public void ResetOnlineInfo()
     {
@@ -76,6 +81,24 @@ public class RealmMap : RealmObject
         Status = MapStatus.Local;
     }
 
+    [CanBeNull]
+    public MapInfo GetMapInfo(List<IMod> mods)
+    {
+        var map = GetMapInfo();
+
+        if (map == null)
+            return null;
+
+        foreach (var mod in mods.OfType<IApplicableToHitObject>())
+            map.HitObjects.ForEach(mod.Apply);
+
+        foreach (var mod in mods.OfType<IApplicableToMap>())
+            mod.Apply(map);
+
+        return map;
+    }
+
+    [CanBeNull]
     public virtual MapInfo GetMapInfo() => GetMapInfo<MapInfo>();
 
     [CanBeNull]
@@ -85,6 +108,10 @@ public class RealmMap : RealmObject
         try
         {
             var path = MapFiles.GetFullPath(MapSet.GetPathForFile(FileName));
+
+            if (!File.Exists(path))
+                return null;
+
             var json = File.ReadAllText(path);
             var hash = MapUtils.GetHash(json);
             var map = json.Deserialize<T>();

@@ -7,17 +7,16 @@ using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Buttons;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Map;
-using fluXis.Game.Online.API.Models.Maps;
-using fluXis.Game.Online.Fluxel;
+using fluXis.Game.Map.Drawables.Online;
 using fluXis.Game.Overlay.User;
 using fluXis.Game.Utils;
+using fluXis.Shared.Components.Maps;
+using JetBrains.Annotations;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Shapes;
-using osu.Framework.Graphics.Sprites;
-using osu.Framework.Graphics.Textures;
 using osuTK;
 
 namespace fluXis.Game.Screens.Browse.Info;
@@ -27,13 +26,14 @@ public partial class BrowseInfo : Container
     [Resolved]
     private MapStore mapStore { get; set; }
 
-    [Resolved]
+    [CanBeNull]
+    [Resolved(CanBeNull = true)]
     private UserProfileOverlay profile { get; set; }
 
     public Bindable<APIMapSet> BindableSet { get; set; } = new();
 
-    private Container background;
-    private Container cover;
+    private SpriteStack<LoadWrapper<DrawableOnlineBackground>> backgroundStack;
+    private SpriteStack<LoadWrapper<DrawableOnlineCover>> coverStack;
     private FluXisSpriteText title;
     private FluXisSpriteText artist;
     private FluXisButton downloadButton;
@@ -72,10 +72,7 @@ public partial class BrowseInfo : Container
                 Masking = true,
                 Children = new Drawable[]
                 {
-                    background = new Container
-                    {
-                        RelativeSizeAxes = Axes.Both
-                    },
+                    backgroundStack = new SpriteStack<LoadWrapper<DrawableOnlineBackground>>(),
                     new Box
                     {
                         RelativeSizeAxes = Axes.Both,
@@ -90,7 +87,7 @@ public partial class BrowseInfo : Container
                         Direction = FillDirection.Vertical,
                         Children = new Drawable[]
                         {
-                            cover = new Container
+                            new Container
                             {
                                 Size = new Vector2(150),
                                 Anchor = Anchor.TopCentre,
@@ -98,7 +95,8 @@ public partial class BrowseInfo : Container
                                 CornerRadius = 20,
                                 Masking = true,
                                 Margin = new MarginPadding { Bottom = 10 },
-                                EdgeEffect = FluXisStyles.ShadowSmall
+                                EdgeEffect = FluXisStyles.ShadowSmall,
+                                Child = coverStack = new SpriteStack<LoadWrapper<DrawableOnlineCover>>()
                             },
                             title = new FluXisSpriteText
                             {
@@ -241,19 +239,19 @@ public partial class BrowseInfo : Container
             downloadButton.Enabled = true;
 
             creatorChip.Text = e.NewValue.Creator.Username;
-            creatorChip.OnClickAction = () => profile.ShowUser(e.NewValue.Creator.ID);
+            creatorChip.OnClickAction = () => profile?.ShowUser(e.NewValue.Creator.ID);
 
-            var minBPM = e.NewValue.Maps.Min(x => x.Bpm);
-            var maxBPM = e.NewValue.Maps.Max(x => x.Bpm);
+            var minBPM = e.NewValue.Maps.Min(x => x.BPM);
+            var maxBPM = e.NewValue.Maps.Max(x => x.BPM);
             bpmChip.Text = minBPM == maxBPM ? $"{minBPM} BPM" : $"{minBPM}-{maxBPM} BPM";
 
             lengthChip.Text = $"{TimeUtils.Format(e.NewValue.Maps.Max(x => x.Length), false)}";
 
-            var minKey = e.NewValue.Maps.Min(x => x.KeyMode);
-            var maxKey = e.NewValue.Maps.Max(x => x.KeyMode);
+            var minKey = e.NewValue.Maps.Min(x => x.Mode);
+            var maxKey = e.NewValue.Maps.Max(x => x.Mode);
             keysChip.Text = minKey == maxKey ? $"{minKey}K" : $"{minKey}-{maxKey}K";
 
-            uploadedChip.Text = DateTimeOffset.FromUnixTimeSeconds(e.NewValue.Submitted).ToString("MMMM dd yyyy");
+            uploadedChip.Text = DateTimeOffset.FromUnixTimeSeconds(e.NewValue.DateSubmitted).ToString("MMMM dd yyyy");
             updatedChip.Text = DateTimeOffset.FromUnixTimeSeconds(e.NewValue.LastUpdated).ToString("MMMM dd yyyy");
             rankedChip.Text = "";
             sourceChip.Text = e.NewValue.Source;
@@ -263,71 +261,19 @@ public partial class BrowseInfo : Container
 
             BindableSet.Value.Maps.ForEach(x => mapFlow.Add(new BrowseInfoMap(BindableSet.Value, x)));
 
-            LoadComponentAsync(new Background(BindableSet.Value), b =>
+            backgroundStack.Add(new LoadWrapper<DrawableOnlineBackground>
             {
-                Schedule(() =>
-                {
-                    background.Add(b);
-                    b.FadeInFromZero(200).OnComplete(_ =>
-                    {
-                        if (background.Children.Count > 1)
-                            background.Children[0].Expire();
-                    });
-                });
-            }, token);
+                RelativeSizeAxes = Axes.Both,
+                OnComplete = d => d.FadeInFromZero(200),
+                LoadContent = () => new DrawableOnlineBackground(BindableSet.Value, OnlineTextureStore.AssetSize.Large)
+            }, 1000);
 
-            LoadComponentAsync(new Cover(BindableSet.Value), c =>
+            coverStack.Add(new LoadWrapper<DrawableOnlineCover>
             {
-                Schedule(() =>
-                {
-                    cover.Add(c);
-                    c.FadeInFromZero(200).OnComplete(_ =>
-                    {
-                        if (cover.Children.Count > 1)
-                            cover.Children[0].Expire();
-                    });
-                });
-            }, token);
+                RelativeSizeAxes = Axes.Both,
+                OnComplete = d => d.FadeInFromZero(200),
+                LoadContent = () => new DrawableOnlineCover(BindableSet.Value, OnlineTextureStore.AssetSize.Large)
+            }, 1000);
         }, true);
-    }
-
-    private partial class Cover : Sprite
-    {
-        private readonly APIMapSet mapSet;
-
-        public Cover(APIMapSet mapSet)
-        {
-            this.mapSet = mapSet;
-        }
-
-        [BackgroundDependencyLoader]
-        private void load(TextureStore textures, FluxelClient fluxel)
-        {
-            RelativeSizeAxes = Axes.Both;
-            FillMode = FillMode.Fill;
-            Anchor = Anchor.Centre;
-            Origin = Anchor.Centre;
-            Texture = textures.Get($"{fluxel.Endpoint.AssetUrl}/cover/{mapSet.ID}");
-        }
-    }
-
-    private partial class Background : Sprite
-    {
-        private readonly APIMapSet mapSet;
-
-        public Background(APIMapSet mapSet)
-        {
-            this.mapSet = mapSet;
-        }
-
-        [BackgroundDependencyLoader]
-        private void load(TextureStore textures, FluxelClient fluxel)
-        {
-            RelativeSizeAxes = Axes.Both;
-            FillMode = FillMode.Fill;
-            Anchor = Anchor.Centre;
-            Origin = Anchor.Centre;
-            Texture = textures.Get($"{fluxel.Endpoint.AssetUrl}/background/{mapSet.ID}");
-        }
     }
 }

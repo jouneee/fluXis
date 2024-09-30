@@ -72,7 +72,7 @@ public partial class FileSelect : CompositeDrawable, ICloseable, IKeyBindingHand
 
         InternalChildren = new Drawable[]
         {
-            new Container
+            new ClickableContainer
             {
                 RelativeSizeAxes = Axes.Both,
                 CornerRadius = 20,
@@ -678,7 +678,7 @@ public partial class FileSelect : CompositeDrawable, ICloseable, IKeyBindingHand
                 {
                     Anchor = Anchor.Centre,
                     Origin = Anchor.Centre,
-                    Icon = FontAwesome6.Solid.ChevronLeft,
+                    Icon = FontAwesome6.Solid.AngleLeft,
                     Size = new Vector2(20)
                 }
             };

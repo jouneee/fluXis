@@ -1,7 +1,9 @@
+using System;
 using fluXis.Game.Graphics;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Input;
+using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.Chat;
 using fluXis.Game.Overlay.Music;
 using fluXis.Game.Overlay.Network;
@@ -13,16 +15,20 @@ using fluXis.Game.Screens.Menu;
 using fluXis.Game.Screens.Ranking;
 using fluXis.Game.Screens.Select;
 using fluXis.Game.Screens.Wiki;
+using fluXis.Game.Utils;
+using Humanizer;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
 using osu.Framework.Screens;
 
 namespace fluXis.Game.Overlay.Toolbar;
 
-public partial class Toolbar : Container
+public partial class Toolbar : VisibilityContainer, IKeyBindingHandler<FluXisGlobalKeybind>
 {
     [Resolved]
     private SettingsMenu settings { get; set; }
@@ -37,23 +43,34 @@ public partial class Toolbar : Container
     private ChatOverlay chat { get; set; }
 
     [Resolved]
+    private IAPIClient api { get; set; }
+
+    [Resolved]
     private FluXisGameBase game { get; set; }
 
     [Resolved]
     private FluXisScreenStack screens { get; set; }
 
-    public BindableBool ShowToolbar { get; } = new();
+    public BindableBool AllowOverlays { get; } = new();
+
+    private bool userControlled;
+
+    public override bool PropagateNonPositionalInputSubTree => AllowOverlays.Value;
+
+    private ToolbarProfile profile;
 
     private string centerTextString;
     private FluXisSpriteText centerText;
+
+    private FluxelClient fluxel => api as FluxelClient;
+    private double lastTime;
 
     [BackgroundDependencyLoader]
     private void load()
     {
         RelativeSizeAxes = Axes.X;
-        Height = 60;
-        Y = -60;
-        Padding = new MarginPadding { Bottom = 10 };
+        Height = 50;
+        Y = -50;
 
         Children = new Drawable[]
         {
@@ -181,15 +198,13 @@ public partial class Toolbar : Container
                                 Keybind = FluXisGlobalKeybind.ToggleMusicPlayer,
                                 Margin = new MarginPadding { Right = 10 }
                             },
-                            new ToolbarProfile(),
+                            profile = new ToolbarProfile(),
                             new ToolbarClock()
                         }
                     }
                 }
             }
         };
-
-        ShowToolbar.BindValueChanged(OnShowToolbarChanged, true);
     }
 
     private void goToScreen(IScreen screen)
@@ -204,12 +219,32 @@ public partial class Toolbar : Container
         screens.Push(screen);
     }
 
-    private void OnShowToolbarChanged(ValueChangedEvent<bool> e)
+    protected override void UpdateState(ValueChangedEvent<Visibility> state)
     {
-        if (e.OldValue == e.NewValue) return;
+        if (state.NewValue == Visibility.Visible && userControlled)
+        {
+            State.Value = Visibility.Hidden;
+            return;
+        }
 
-        this.MoveToY(e.NewValue ? 0 : -Height, 500, Easing.OutQuint);
+        profile.State.Value = state.NewValue;
+        base.UpdateState(state);
     }
+
+    protected override void PopIn() => this.MoveToY(0, FluXisScreen.MOVE_DURATION, Easing.OutQuint);
+    protected override void PopOut() => this.MoveToY(-Height, FluXisScreen.MOVE_DURATION, Easing.OutQuint);
+
+    public bool OnPressed(KeyBindingPressEvent<FluXisGlobalKeybind> e)
+    {
+        if (e.Action != FluXisGlobalKeybind.ToggleToolbar)
+            return false;
+
+        userControlled = State.Value == Visibility.Visible;
+        ToggleVisibility();
+        return true;
+    }
+
+    public void OnReleased(KeyBindingReleaseEvent<FluXisGlobalKeybind> e) { }
 
     public void SetCenterText(string text)
     {
@@ -224,6 +259,29 @@ public partial class Toolbar : Container
         {
             centerText.Text = text;
             centerText.FadeIn(400, Easing.OutQuint);
+        }
+    }
+
+    protected override void Update()
+    {
+        base.Update();
+
+        if (Time.Current - lastTime < 1000)
+            return;
+
+        lastTime = Time.Current;
+
+        if (fluxel is { MaintenanceTime: > 0 })
+        {
+            var time = TimeUtils.GetFromSeconds(fluxel.MaintenanceTime);
+            var timeLeft = time - DateTimeOffset.UtcNow;
+            SetCenterText($"Server maintenance in {timeLeft.Humanize()}.");
+
+            if (time <= DateTimeOffset.UtcNow)
+            {
+                fluxel.MaintenanceTime = 0;
+                SetCenterText(string.Empty);
+            }
         }
     }
 }

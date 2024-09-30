@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using fluXis.Game.Screens.Gameplay.HUD.Components;
-using fluXis.Game.Screens.Gameplay.HUD.Components.Judgement;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
@@ -33,6 +32,7 @@ public partial class GameplayHUD : Container
         componentLookup.Add("HitError", typeof(HitErrorBar));
         componentLookup.Add("Judgement", typeof(JudgementDisplay));
         componentLookup.Add("JudgementCounter", typeof(JudgementCounter));
+        componentLookup.Add("PerformanceRating", typeof(PerformanceRatingDisplay));
         componentLookup.Add("Progress", typeof(Progressbar));
     }
 
@@ -51,7 +51,8 @@ public partial class GameplayHUD : Container
             {
                 RelativeSizeAxes = Axes.Y,
                 Anchor = Anchor.Centre,
-                Origin = Anchor.Centre
+                Origin = Anchor.Centre,
+                AlwaysPresent = true
             }
         };
 
@@ -80,11 +81,13 @@ public partial class GameplayHUD : Container
 
         playfieldComponents.Position = screen.Playfield.Position;
         playfieldComponents.Width = screen.Playfield.DrawWidth;
+        playfieldComponents.Rotation = screen.Playfield.Rotation;
+        playfieldComponents.Alpha = screen.Playfield.Alpha;
 
         var scale = screen.Playfield.Scale;
 
         if (screen.Playfield.IsUpScroll)
-            scale *= new Vector2(0, -1);
+            scale *= new Vector2(1, -1);
 
         playfieldComponents.Scale = scale;
     }

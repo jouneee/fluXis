@@ -43,13 +43,15 @@ public partial class SetupTextBox : SetupEntry, ITabbableContainer
             PlaceholderText = Placeholder,
             BackgroundActive = FluXisColors.Background3,
             BackgroundInactive = FluXisColors.Background3,
-            OnTextChanged = () => OnChange.Invoke(textBox.Text)
+            OnTextChanged = () => OnChange.Invoke(textBox.Text),
+            OnCommitAction = () => OnChange.Invoke(textBox.Text),
+            CommitOnFocusLost = true,
         };
     }
 
     protected override void OnFocus(FocusEvent e)
     {
         // redirect focus to the textbox
-        GetContainingInputManager().ChangeFocus(textBox);
+        GetContainingFocusManager()?.ChangeFocus(textBox);
     }
 }

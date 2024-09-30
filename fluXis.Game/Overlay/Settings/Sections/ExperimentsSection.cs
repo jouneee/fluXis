@@ -22,6 +22,17 @@ public partial class ExperimentsSection : SettingsSection
             {
                 Label = "Enable Design Tab",
                 Bindable = experiments.GetBindable<bool>(ExperimentConfig.DesignTab)
+            },
+            new SettingsToggle
+            {
+                Label = "Enable Storyboarding Tab",
+                Bindable = experiments.GetBindable<bool>(ExperimentConfig.StoryboardTab)
+            },
+            new SettingsToggle
+            {
+                Label = "Seeking in replays",
+                Description = "Might make gameplay with a lot of effects more laggy.",
+                Bindable = experiments.GetBindable<bool>(ExperimentConfig.Seeking)
             }
         });
     }

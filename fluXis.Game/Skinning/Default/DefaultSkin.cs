@@ -1,12 +1,14 @@
 using System;
 using fluXis.Game.Audio;
 using fluXis.Game.Scoring.Processing.Health;
+using fluXis.Game.Screens.Course;
 using fluXis.Game.Skinning.Bases.Judgements;
 using fluXis.Game.Skinning.Default.Health;
 using fluXis.Game.Skinning.Default.HitObject;
 using fluXis.Game.Skinning.Default.Judgements;
 using fluXis.Game.Skinning.Default.Lighting;
 using fluXis.Game.Skinning.Default.Receptor;
+using fluXis.Game.Skinning.Default.Results;
 using fluXis.Game.Skinning.Default.Stage;
 using fluXis.Game.Skinning.Json;
 using fluXis.Shared.Scoring.Enums;
@@ -48,6 +50,11 @@ public class DefaultSkin : ISkin
             UISamples.SampleType.ClickDisabled => samples.Get("UI/click-disabled"),
             _ => null
         };
+    }
+
+    public Sample GetCourseSample(CourseScreen.SampleType type)
+    {
+        return null;
     }
 
     public Drawable GetStageBackground() => new DefaultStageBackground();
@@ -98,10 +105,14 @@ public class DefaultSkin : ISkin
     public Drawable GetHitLine() => new DefaultHitLine(SkinJson);
     public AbstractJudgementText GetJudgement(Judgement judgement, bool isLate) => new DefaultJudgementText(judgement, isLate);
 
+    public Drawable GetResultsScoreRank(ScoreRank rank) => new DefaultResultsRank(rank);
+
     public Sample GetHitSample() => samples.Get("Gameplay/hitsound");
     public Sample[] GetMissSamples() => new[] { samples.Get("Gameplay/combobreak") };
     public Sample GetFailSample() => samples.Get("Gameplay/fail");
     public Sample GetRestartSample() => samples.Get("Gameplay/restart");
+    public Sample GetFullComboSample() => samples.Get("Gameplay/full-combo");
+    public Sample GetAllFlawlessSample() => samples.Get("Gameplay/all-flawless");
 
     public void Dispose()
     {

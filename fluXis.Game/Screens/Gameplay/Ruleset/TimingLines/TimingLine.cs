@@ -9,12 +9,13 @@ public partial class TimingLine : Box
     [Resolved]
     private Playfield playfield { get; set; }
 
-    public float OriginalTime { get; }
+    public double OriginalTime { get; }
     private double scrollVelocityTime;
+    private Easing easing = Easing.None;
 
     public TimingLine(double time)
     {
-        OriginalTime = (float)time;
+        OriginalTime = time;
     }
 
     [BackgroundDependencyLoader]
@@ -25,10 +26,11 @@ public partial class TimingLine : Box
         Origin = Anchor.BottomLeft;
 
         scrollVelocityTime = playfield.Manager.ScrollVelocityPositionFromTime(OriginalTime);
+        easing = playfield.Manager.EasingAtTime(OriginalTime);
     }
 
     protected override void Update()
     {
-        Y = playfield.Manager.PositionAtTime(scrollVelocityTime);
+        Y = playfield.Manager.PositionAtTime(scrollVelocityTime, easing);
     }
 }

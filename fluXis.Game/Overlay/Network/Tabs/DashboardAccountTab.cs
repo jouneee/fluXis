@@ -1,24 +1,33 @@
+using System;
+using System.IO;
 using fluXis.Game.Graphics.Drawables;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface;
+using fluXis.Game.Graphics.UserInterface.Buttons;
+using fluXis.Game.Graphics.UserInterface.Buttons.Presets;
+using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Graphics.UserInterface.Files;
 using fluXis.Game.Graphics.UserInterface.Panel;
 using fluXis.Game.Online;
-using fluXis.Game.Online.API.Models.Users;
-using fluXis.Game.Online.API.Requests.Account;
+using fluXis.Game.Online.API.Requests.Users;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.Network.Tabs.Account;
 using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Overlay.Notifications.Tasks;
 using fluXis.Game.Utils;
+using fluXis.Shared.API.Payloads.Users;
+using fluXis.Shared.Components.Users;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Logging;
 using osuTK;
 
 namespace fluXis.Game.Overlay.Network.Tabs;
+
+#nullable enable
 
 public partial class DashboardAccountTab : DashboardTab
 {
@@ -27,29 +36,33 @@ public partial class DashboardAccountTab : DashboardTab
     public override DashboardTabType Type => DashboardTabType.Account;
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; } = null!;
 
     [Resolved]
-    private NotificationManager notifications { get; set; }
+    private UserCache users { get; set; } = null!;
 
     [Resolved]
-    private PanelContainer panels { get; set; }
+    private NotificationManager notifications { get; set; } = null!;
 
-    private APIEditingUser user;
-    private Container editContent;
-    private LoadingIcon loadingIcon;
+    [Resolved]
+    private PanelContainer panels { get; set; } = null!;
 
-    private IdleTracker socialsTracker;
-    private DashboardAccountCategory socialsCategory;
-    private DashboardAccountEntry twitterEntry;
-    private DashboardAccountEntry youtubeEntry;
-    private DashboardAccountEntry twitchEntry;
-    private DashboardAccountEntry discordEntry;
+    private APIUser user = null!;
+    private Container editContent = null!;
+    private Container unsavedContent = null!;
+    private LoadingIcon loadingIcon = null!;
 
-    private IdleTracker displayNameTracker;
-    private DashboardAccountEntry displayNameEntry;
-    private IdleTracker aboutmeTracker;
-    private DashboardAccountEntry aboutmeEntry;
+    private DashboardAccountEntry twitterEntry = null!;
+    private DashboardAccountEntry youtubeEntry = null!;
+    private DashboardAccountEntry twitchEntry = null!;
+    private DashboardAccountEntry discordEntry = null!;
+
+    private DashboardAccountEntry displayNameEntry = null!;
+    private DashboardAccountEntry aboutmeEntry = null!;
+    private DashboardAccountEntry pronounsEntry = null!;
+
+    private bool hasUnsavedChanges;
+    private bool saving;
 
     [BackgroundDependencyLoader]
     private void load()
@@ -60,20 +73,77 @@ public partial class DashboardAccountTab : DashboardTab
             {
                 RelativeSizeAxes = Axes.Both
             },
+            unsavedContent = new CircularContainer
+            {
+                Width = 644,
+                AutoSizeAxes = Axes.Y,
+                Anchor = Anchor.BottomCentre,
+                Origin = Anchor.BottomCentre,
+                Margin = new MarginPadding(12),
+                Masking = true,
+                Alpha = 0,
+                Y = 40,
+                Children = new Drawable[]
+                {
+                    new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = FluXisColors.Background3
+                    },
+                    new FluXisSpriteText
+                    {
+                        Text = "There are unsaved changes.",
+                        Anchor = Anchor.CentreLeft,
+                        Origin = Anchor.CentreLeft,
+                        WebFontSize = 14,
+                        X = 16
+                    },
+                    new FillFlowContainer
+                    {
+                        AutoSizeAxes = Axes.Both,
+                        Direction = FillDirection.Horizontal,
+                        Anchor = Anchor.CentreRight,
+                        Origin = Anchor.CentreRight,
+                        Spacing = new Vector2(8),
+                        Padding = new MarginPadding(8),
+                        Children = new Drawable[]
+                        {
+                            new FluXisButton
+                            {
+                                Size = new Vector2(128, 32),
+                                FontSize = FluXisSpriteText.GetWebFontSize(14),
+                                Data = new CancelButtonData("Reset", reset)
+                            },
+                            new FluXisButton
+                            {
+                                Size = new Vector2(128, 32),
+                                FontSize = FluXisSpriteText.GetWebFontSize(14),
+                                Data = new ButtonData
+                                {
+                                    Text = "Save",
+                                    Action = save,
+                                    Color = FluXisColors.Highlight,
+                                    TextColor = FluXisColors.Background2
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             loadingIcon = new LoadingIcon
             {
                 Anchor = Anchor.Centre,
                 Origin = Anchor.Centre,
                 Alpha = 0
-            },
-            socialsTracker = new IdleTracker(3000, socialsTrigger, () => socialsCategory.LoadingIcon.FadeIn(400)),
-            displayNameTracker = new IdleTracker(3000, displayNameTrigger, () => displayNameEntry.LoadingIcon.FadeIn(400)),
-            aboutmeTracker = new IdleTracker(3000, aboutmeTrigger, () => aboutmeEntry.LoadingIcon.FadeIn(400))
+            }
         };
     }
 
     private FillFlowContainer createContent()
     {
+        if (user.Socials is null)
+            return new FillFlowContainer();
+
         return new FillFlowContainer
         {
             Width = 1200,
@@ -107,30 +177,7 @@ public partial class DashboardAccountTab : DashboardTab
                             {
                                 panels.Content = new FileSelect
                                 {
-                                    OnFileSelected = file =>
-                                    {
-                                        var notification = new TaskNotificationData
-                                        {
-                                            Text = "Avatar Update",
-                                            TextWorking = "Uploading..."
-                                        };
-
-                                        notifications.AddTask(notification);
-
-                                        var req = new AvatarUploadRequest(file);
-                                        req.Progress += (cur, max) => notification.Progress = cur / (float)max;
-                                        req.Success += res =>
-                                        {
-                                            notification.State = res.Status == 200 ? LoadingState.Complete : LoadingState.Failed;
-                                            UserCache.TriggerAvatarUpdate(user.ID);
-                                        };
-                                        req.Failure += ex =>
-                                        {
-                                            notification.State = LoadingState.Failed;
-                                            Logger.Error(ex, "Failed to upload avatar!");
-                                        };
-                                        req.PerformAsync(fluxel);
-                                    },
+                                    OnFileSelected = file => uploadImage(file, false),
                                     AllowedExtensions = FluXisGame.IMAGE_EXTENSIONS
                                 };
                             }
@@ -153,30 +200,7 @@ public partial class DashboardAccountTab : DashboardTab
                             {
                                 panels.Content = new FileSelect
                                 {
-                                    OnFileSelected = file =>
-                                    {
-                                        var notif = new TaskNotificationData
-                                        {
-                                            Text = "Banner Update",
-                                            TextWorking = "Uploading..."
-                                        };
-
-                                        notifications.AddTask(notif);
-
-                                        var req = new BannerUploadRequest(file);
-                                        req.Progress += (cur, max) => notif.Progress = cur / (float)max;
-                                        req.Success += res =>
-                                        {
-                                            notif.State = res.Status == 200 ? LoadingState.Complete : LoadingState.Failed;
-                                            UserCache.TriggerBannerUpdate(user.ID);
-                                        };
-                                        req.Failure += ex =>
-                                        {
-                                            notif.State = LoadingState.Failed;
-                                            Logger.Error(ex, "Failed to upload banner!");
-                                        };
-                                        req.PerformAsync(fluxel);
-                                    },
+                                    OnFileSelected = file => uploadImage(file, true),
                                     AllowedExtensions = FluXisGame.IMAGE_EXTENSIONS
                                 };
                             }
@@ -221,7 +245,7 @@ public partial class DashboardAccountTab : DashboardTab
                         }
                     }
                 },
-                socialsCategory = new DashboardAccountCategory("Socials")
+                new DashboardAccountCategory("Socials")
                 {
                     Children = new Drawable[]
                     {
@@ -229,25 +253,25 @@ public partial class DashboardAccountTab : DashboardTab
                         {
                             Title = "Twitter",
                             Default = user.Socials.Twitter,
-                            OnChange = () => socialsTracker.Reset()
+                            OnChange = updateUnsavedStatus
                         },
                         youtubeEntry = new DashboardAccountEntry
                         {
                             Title = "YouTube",
                             Default = user.Socials.YouTube,
-                            OnChange = () => socialsTracker.Reset()
+                            OnChange = updateUnsavedStatus
                         },
                         twitchEntry = new DashboardAccountEntry
                         {
                             Title = "Twitch",
                             Default = user.Socials.Twitch,
-                            OnChange = () => socialsTracker.Reset()
+                            OnChange = updateUnsavedStatus
                         },
                         discordEntry = new DashboardAccountEntry
                         {
                             Title = "Discord",
                             Default = user.Socials.Discord,
-                            OnChange = () => socialsTracker.Reset()
+                            OnChange = updateUnsavedStatus
                         }
                     }
                 },
@@ -260,14 +284,21 @@ public partial class DashboardAccountTab : DashboardTab
                             Title = "Display Name",
                             Placeholder = "...",
                             Default = user.DisplayName,
-                            OnChange = () => displayNameTracker.Reset()
+                            OnChange = updateUnsavedStatus
                         },
                         aboutmeEntry = new DashboardAccountEntry
                         {
                             Title = "About Me",
                             Placeholder = "...",
                             Default = user.AboutMe,
-                            OnChange = () => aboutmeTracker.Reset()
+                            OnChange = updateUnsavedStatus
+                        },
+                        pronounsEntry = new DashboardAccountEntry
+                        {
+                            Title = "Pronouns",
+                            Placeholder = "../..",
+                            Default = user.Pronouns,
+                            OnChange = updateUnsavedStatus
                         }
                     }
                 }
@@ -275,46 +306,116 @@ public partial class DashboardAccountTab : DashboardTab
         };
     }
 
-    private async void socialsTrigger()
+    private void updateUnsavedStatus()
     {
-        var req = new SocialUpdateRequest(twitterEntry.Value, youtubeEntry.Value, twitchEntry.Value, discordEntry.Value);
-        await req.PerformAsync(fluxel);
+        hasUnsavedChanges = false;
 
-        if (req.Response.Status == 200)
-        {
-            socialsCategory.CompletedIcon.FadeIn(400).Delay(1000).FadeOut(400);
-            socialsCategory.LoadingIcon.FadeOut(400);
-        }
+        hasUnsavedChanges |= twitterEntry.Value != user.Socials?.Twitter;
+        hasUnsavedChanges |= youtubeEntry.Value != user.Socials?.YouTube;
+        hasUnsavedChanges |= twitchEntry.Value != user.Socials?.Twitch;
+        hasUnsavedChanges |= discordEntry.Value != user.Socials?.Discord;
+
+        hasUnsavedChanges |= displayNameEntry.Value != user.DisplayName;
+        hasUnsavedChanges |= aboutmeEntry.Value != user.AboutMe;
+        hasUnsavedChanges |= pronounsEntry.Value != user.Pronouns;
+
+        if (hasUnsavedChanges)
+            unsavedContent.FadeIn(400).MoveToY(0, 600, Easing.OutQuint);
         else
-            notifications.SendError("Failed to update socials!", req.Response.Message);
+            unsavedContent.FadeOut(400).MoveToY(40, 600, Easing.OutQuint);
     }
 
-    private async void displayNameTrigger()
+    private void save()
     {
-        var req = new DisplayNameUpdateRequest(displayNameEntry.Value);
-        await req.PerformAsync(fluxel);
+        if (saving || !hasUnsavedChanges)
+            return;
 
-        if (req.Response.Status == 200)
+        saving = true;
+
+        var req = new UserProfileUpdateRequest(user.ID, new UserProfileUpdatePayload
         {
-            displayNameEntry.CompletedIcon.FadeIn(400).Delay(1000).FadeOut(400);
-            displayNameEntry.LoadingIcon.FadeOut(400);
-        }
-        else
-            notifications.SendError("Failed to update display name!", req.Response.Message);
+            Twitter = getValue(user.Socials?.Twitter, twitterEntry.Value),
+            YouTube = getValue(user.Socials?.YouTube, youtubeEntry.Value),
+            Twitch = getValue(user.Socials?.Twitch, twitchEntry.Value),
+            Discord = getValue(user.Socials?.Discord, discordEntry.Value),
+            DisplayName = getValue(user.DisplayName, displayNameEntry.Value),
+            AboutMe = getValue(user.AboutMe, aboutmeEntry.Value),
+            Pronouns = getValue(user.Pronouns, pronounsEntry.Value)
+        });
+
+        req.Success += res =>
+        {
+            user = res.Data;
+            saving = false;
+            updateUnsavedStatus();
+        };
+
+        req.Failure += ex =>
+        {
+            updateUnsavedStatus();
+            saving = false;
+            notifications.SendError("Failed to save changes!", ex.Message);
+        };
+
+        api.PerformRequestAsync(req);
+
+        string? getValue(string? original, string? val) => val == original ? null : val;
     }
 
-    private async void aboutmeTrigger()
+    private void uploadImage(FileInfo file, bool banner)
     {
-        var req = new AboutMeUpdateRequest(aboutmeEntry.Value);
-        await req.PerformAsync(fluxel);
-
-        if (req.Response.Status == 200)
+        var notification = new TaskNotificationData
         {
-            aboutmeEntry.CompletedIcon.FadeIn(400).Delay(1000).FadeOut(400);
-            aboutmeEntry.LoadingIcon.FadeOut(400);
-        }
+            Text = $"{(banner ? "Banner" : "Avatar")} Update",
+            TextWorking = "Uploading..."
+        };
+
+        notifications.AddTask(notification);
+
+        var bytes = File.ReadAllBytes(file.FullName);
+        var b64 = Convert.ToBase64String(bytes);
+
+        var parameters = new UserProfileUpdatePayload();
+
+        if (banner)
+            parameters.Banner = b64;
         else
-            notifications.SendError("Failed to update about me!", req.Response.Message);
+            parameters.Avatar = b64;
+
+        var req = new UserProfileUpdateRequest(user.ID, parameters);
+        req.Progress += (cur, max) => notification.Progress = cur / (float)max;
+
+        req.Failure += ex =>
+        {
+            notification.TextFailed = ex.Message;
+            notification.State = LoadingState.Failed;
+        };
+
+        req.Success += _ =>
+        {
+            if (banner)
+                users.TriggerBannerUpdate(user.ID);
+            else
+                users.TriggerAvatarUpdate(user.ID);
+
+            notification.State = LoadingState.Complete;
+        };
+
+        api.PerformRequestAsync(req);
+    }
+
+    private void reset()
+    {
+        twitterEntry.Value = user.Socials?.Twitter;
+        youtubeEntry.Value = user.Socials?.YouTube;
+        twitchEntry.Value = user.Socials?.Twitch;
+        discordEntry.Value = user.Socials?.Discord;
+
+        displayNameEntry.Value = user.DisplayName;
+        aboutmeEntry.Value = user.AboutMe;
+        pronounsEntry.Value = user.Pronouns;
+
+        updateUnsavedStatus();
     }
 
     public override void Enter()
@@ -324,15 +425,15 @@ public partial class DashboardAccountTab : DashboardTab
         editContent.Clear();
         loadingIcon.FadeIn(400);
 
-        var req = new AccountSelfRequest();
+        if (api.User.Value is null)
+        {
+            loadingIcon.FadeOut(400);
+            return;
+        }
+
+        var req = new UserRequest(api.User.Value.ID);
         req.Success += res =>
         {
-            if (res.Status != 200)
-            {
-                notifications.SendError("Failed to get self!", res.Message);
-                return;
-            }
-
             user = res.Data;
             editContent.Child = createContent();
             loadingIcon.FadeOut(400);
@@ -344,6 +445,6 @@ public partial class DashboardAccountTab : DashboardTab
             notifications.SendError("Failed to get self!", ex.Message);
         };
 
-        req.PerformAsync(fluxel);
+        api.PerformRequestAsync(req);
     }
 }

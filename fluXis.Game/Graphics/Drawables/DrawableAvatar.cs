@@ -1,40 +1,63 @@
+using System;
 using fluXis.Game.Online;
-using fluXis.Game.Online.Drawables;
 using fluXis.Shared.Components.Users;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.Textures;
 using osu.Framework.Input.Events;
 
 namespace fluXis.Game.Graphics.Drawables;
 
+#nullable enable
+
 public partial class DrawableAvatar : Sprite
 {
     [Resolved]
-    private OnlineTextureStore store { get; set; }
+    private OnlineTextureStore store { get; set; } = null!;
 
-    public bool ShowTooltip { get; set; }
+    [Resolved]
+    private TextureStore textures { get; set; } = null!;
 
-    private APIUserShort user;
+    [Resolved]
+    private UserCache? users { get; set; }
 
-    public DrawableAvatar(APIUserShort user)
+    public Action? ClickAction { get; init; }
+
+    private APIUser? user;
+
+    public DrawableAvatar(APIUser? user)
     {
-        this.user = user ?? APIUserShort.Dummy;
-        Alpha = 0;
+        this.user = user;
         FillMode = FillMode.Fill;
     }
 
     [BackgroundDependencyLoader]
     private void load()
     {
-        Texture = store.GetAvatar(user.ID);
+        setTexture();
     }
 
-    protected override void LoadComplete()
+    private void setTexture()
     {
-        this.FadeInFromZero(400);
+        if (user is { ID: >= 0 }) // the texture from the online store could still be null
+            Texture = store.GetAvatar(user.AvatarHash) ?? textures.Get("Online/default-avatar");
+        else
+            Texture = textures.Get("Online/default-avatar");
 
-        UserCache.GetAvatarUpdateCallbacks(user.ID).Add(reload);
+        Schedule(() => this.FadeInFromZero(400));
+    }
+
+    private void registerCallback()
+    {
+        if (user != null)
+            users?.RegisterAvatarCallback(user.ID, reload);
+    }
+
+    private void unregisterCallback()
+    {
+        if (user != null)
+            users?.UnregisterAvatarCallback(user.ID, reload);
     }
 
     private void reload()
@@ -43,31 +66,28 @@ public partial class DrawableAvatar : Sprite
         Texture = null;
 
         // wait 2 frames to allow texture store to clear
-        Schedule(() => Schedule(() =>
-        {
-            Texture = store.GetAvatar(user.ID);
-            this.FadeInFromZero(400);
-        }));
+        Schedule(() => Schedule(setTexture));
     }
 
-    public void UpdateUser(APIUserShort newUser)
+    public void UpdateUser(APIUser? newUser)
     {
-        UserCache.GetAvatarUpdateCallbacks(user.ID).Remove(reload);
+        unregisterCallback();
 
-        user = newUser ?? APIUserShort.Dummy;
-        Texture = store.GetAvatar(user.ID);
-        Schedule(() => this.FadeInFromZero(400));
+        user = newUser;
+        setTexture();
 
-        UserCache.GetAvatarUpdateCallbacks(user.ID).Add(reload);
+        registerCallback();
+    }
+
+    protected override bool OnClick(ClickEvent e)
+    {
+        ClickAction?.Invoke();
+        return ClickAction != null;
     }
 
     protected override void Dispose(bool isDisposing)
     {
         base.Dispose(isDisposing);
-
-        UserCache.GetAvatarUpdateCallbacks(user.ID).Remove(reload);
+        unregisterCallback();
     }
-
-    protected override bool OnHover(HoverEvent e) => user.ID >= 0 && ShowTooltip;
-    public Drawable GetTooltip() => OnHover(null) ? new UserTooltip { UserID = user.ID } : null;
 }

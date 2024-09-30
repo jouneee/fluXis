@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using fluXis.Game.Graphics.Sprites;
-using fluXis.Game.Map.Events;
-using fluXis.Game.Map.Structures;
+using fluXis.Game.Graphics.UserInterface.Color;
+using fluXis.Game.Map.Structures.Bases;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.List;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings.Preset;
@@ -15,7 +16,7 @@ namespace fluXis.Game.Screens.Edit.Tabs.Design.Points.Entries;
 public partial class FlashEntry : PointListEntry
 {
     protected override string Text => "Flash";
-    protected override Colour4 Color => Colour4.FromHex("#FFCC66");
+    protected override Colour4 Color => FluXisColors.Flash;
 
     private FlashEvent flash => Object as FlashEvent;
 
@@ -24,7 +25,7 @@ public partial class FlashEntry : PointListEntry
     {
     }
 
-    protected override ITimedObject CreateClone() => new FlashEvent
+    public override ITimedObject CreateClone() => new FlashEvent
     {
         Time = Object.Time,
         Duration = flash.Duration,
@@ -126,6 +127,7 @@ public partial class FlashEntry : PointListEntry
                     Map.Update(flash);
                 }
             },
+            new PointSettingsEasing<FlashEvent>(Map, flash)
         });
     }
 }

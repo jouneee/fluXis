@@ -15,13 +15,12 @@ namespace fluXis.Game.Graphics.UserInterface.Panel;
 
 public partial class ButtonPanel : Panel, ICloseable
 {
-    public const string COMMON_CONFIRM = "Yes, do it.";
-    public const string COMMON_CANCEL = "Wait, no nevermind.";
-
     public IconUsage Icon { get; init; } = FontAwesome.Solid.QuestionCircle;
-    public LocalisableString Text { get; init; } = "Default Text";
+    public LocalisableString Text { get; init; }
     public LocalisableString SubText { get; init; }
     public ButtonData[] Buttons { get; init; } = Array.Empty<ButtonData>();
+
+    public Action<FluXisTextFlow> CreateSubText { get; set; }
 
     [BackgroundDependencyLoader]
     private void load()
@@ -29,9 +28,11 @@ public partial class ButtonPanel : Panel, ICloseable
         Width = 490;
         AutoSizeAxes = Axes.Y;
 
+        FluXisTextFlow subTextFlow;
+
         Content.RelativeSizeAxes = Axes.X;
         Content.AutoSizeAxes = Axes.Y;
-        Content.Padding = new MarginPadding(20) { Top = 30 };
+        Content.Padding = new MarginPadding(0);
         Content.Children = new Drawable[]
         {
             new FillFlowContainer
@@ -40,6 +41,7 @@ public partial class ButtonPanel : Panel, ICloseable
                 AutoSizeAxes = Axes.Y,
                 Spacing = new Vector2(10),
                 Direction = FillDirection.Vertical,
+                Padding = new MarginPadding(20) { Top = 30 },
                 Children = new Drawable[]
                 {
                     new SpriteIcon
@@ -61,16 +63,15 @@ public partial class ButtonPanel : Panel, ICloseable
                         FontSize = FluXisSpriteText.GetWebFontSize(20),
                         Shadow = false
                     },
-                    new FluXisTextFlow
+                    subTextFlow = new FluXisTextFlow
                     {
                         RelativeSizeAxes = Axes.X,
                         AutoSizeAxes = Axes.Y,
                         Anchor = Anchor.TopCentre,
                         Origin = Anchor.TopCentre,
                         TextAnchor = Anchor.TopCentre,
-                        Text = SubText,
                         FontSize = FluXisSpriteText.GetWebFontSize(14),
-                        Alpha = string.IsNullOrEmpty(SubText.ToString()) ? 0 : .8f,
+                        Alpha = string.IsNullOrEmpty(SubText.ToString()) && CreateSubText == null ? 0 : .8f,
                         Shadow = false
                     },
                     new FillFlowContainer
@@ -89,19 +90,25 @@ public partial class ButtonPanel : Panel, ICloseable
                             Action = () =>
                             {
                                 b.Action?.Invoke();
-                                Hide();
+                                if (!Loading) Hide();
                             }
                         })
                     }
                 }
             }
         };
+
+        CreateSubText ??= f => f.Text = SubText;
+        CreateSubText.Invoke(subTextFlow);
     }
 
     protected override bool OnClick(ClickEvent e) => true;
 
     public void Close()
     {
+        if (Loading)
+            return;
+
         var last = Buttons.Last();
         last.Action?.Invoke();
         Hide();

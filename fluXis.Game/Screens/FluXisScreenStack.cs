@@ -11,7 +11,8 @@ namespace fluXis.Game.Screens;
 
 public partial class FluXisScreenStack : ScreenStack
 {
-    [Resolved]
+    [CanBeNull]
+    [Resolved(CanBeNull = true)]
     private GlobalBackground backgrounds { get; set; }
 
     [CanBeNull]
@@ -19,12 +20,15 @@ public partial class FluXisScreenStack : ScreenStack
     private Toolbar toolbar { get; set; }
 
     public bool AllowMusicControl => CurrentScreen is FluXisScreen { AllowMusicControl: true };
+    public bool AllowMusicPausing => CurrentScreen is FluXisScreen { AllowMusicPausing: true };
 
     private Bindable<UserActivity> activity { get; } = new();
+    private Bindable<bool> allowOverlays { get; } = new();
 
-    public FluXisScreenStack(Bindable<UserActivity> activity = null)
+    public FluXisScreenStack(Bindable<UserActivity> activity = null, Bindable<bool> allowOverlays = null)
     {
         this.activity = activity ?? this.activity;
+        this.allowOverlays = allowOverlays ?? this.allowOverlays;
 
         RelativeSizeAxes = Axes.Both;
         ScreenPushed += updateScreen;
@@ -36,17 +40,22 @@ public partial class FluXisScreenStack : ScreenStack
         if (last is FluXisScreen lastScreen)
         {
             activity.UnbindFrom(lastScreen.Activity);
+            allowOverlays.UnbindFrom(lastScreen.AllowOverlays);
         }
 
         if (next is FluXisScreen nextScreen)
         {
             activity.BindTo(nextScreen.Activity);
+            allowOverlays.BindTo(nextScreen.AllowOverlays);
 
             if (nextScreen.ApplyValuesAfterLoad && !nextScreen.IsLoaded) nextScreen.OnLoadComplete += _ => updateValues(nextScreen);
             else updateValues(nextScreen);
         }
         else
         {
+            if (backgrounds == null)
+                return;
+
             backgrounds.Zoom = 1f;
             backgrounds.ParallaxStrength = .05f;
             backgrounds.SetBlur(0f);
@@ -61,8 +70,12 @@ public partial class FluXisScreenStack : ScreenStack
 
         backgrounds.Zoom = screen.Zoom;
         backgrounds.ParallaxStrength = screen.ParallaxStrength;
-        toolbar.ShowToolbar.Value = screen.ShowToolbar;
         backgrounds.SetBlur(screen.BackgroundBlur);
         backgrounds.SetDim(screen.BackgroundDim);
+
+        if (screen.ShowToolbar)
+            toolbar.Show();
+        else
+            toolbar.Hide();
     }
 }

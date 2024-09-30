@@ -28,13 +28,15 @@ public partial class DrawableHitObject : CompositeDrawable
     protected double ScrollVelocityTime { get; private set; }
     protected double ScrollVelocityEndTime { get; private set; }
 
+    private Easing easing = Easing.None;
+
     public FluXisGameplayKeybind Keybind { get; set; }
 
     public virtual bool CanBeRemoved => false;
     public virtual HitWindows HitWindows => Screen.HitWindows;
 
     public bool Judged { get; private set; }
-    public Action<DrawableHitObject, float> OnHit { get; set; }
+    public Action<DrawableHitObject, double> OnHit { get; set; }
 
     protected DrawableHitObject(HitObject data)
     {
@@ -49,6 +51,7 @@ public partial class DrawableHitObject : CompositeDrawable
 
         ScrollVelocityTime = ObjectManager.ScrollVelocityPositionFromTime(Data.Time);
         ScrollVelocityEndTime = ObjectManager.ScrollVelocityPositionFromTime(Data.EndTime);
+        easing = ObjectManager.EasingAtTime(Data.Time);
     }
 
     protected override void LoadComplete()
@@ -64,7 +67,7 @@ public partial class DrawableHitObject : CompositeDrawable
         base.Update();
 
         X = ObjectManager.PositionAtLane(Data.Lane);
-        Y = ObjectManager.PositionAtTime(ScrollVelocityTime);
+        Y = ObjectManager.PositionAtTime(ScrollVelocityTime, easing);
         Width = ObjectManager.WidthOfLane(Data.Lane);
     }
 
@@ -82,12 +85,12 @@ public partial class DrawableHitObject : CompositeDrawable
             return;
 
         var offset = Data.Time - Time.Current;
-        CheckJudgement(byUser, (float)offset);
+        CheckJudgement(byUser, offset);
     }
 
-    protected virtual void CheckJudgement(bool byUser, float offset) { }
+    protected virtual void CheckJudgement(bool byUser, double offset) { }
 
-    protected void ApplyResult(float diff)
+    protected void ApplyResult(double diff)
     {
         if (Judged)
             throw new InvalidOperationException("Can not apply judgement to already judged hitobject.");

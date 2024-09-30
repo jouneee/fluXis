@@ -10,6 +10,7 @@ using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
 using osuTK;
 
 namespace fluXis.Game.Graphics.UserInterface.Buttons;
@@ -18,9 +19,10 @@ public partial class CornerButton : Container
 {
     private const int corner_radius = 20;
 
-    private string buttonText;
+    private IconUsage iconSprite = FontAwesome6.Solid.Question;
+    private LocalisableString buttonText;
 
-    public virtual string ButtonText
+    public virtual LocalisableString ButtonText
     {
         get => buttonText;
         set
@@ -32,11 +34,23 @@ public partial class CornerButton : Container
         }
     }
 
-    public virtual IconUsage Icon { get; set; } = FontAwesome6.Solid.Question;
+    public virtual IconUsage Icon
+    {
+        get => iconSprite;
+        set
+        {
+            iconSprite = value;
+
+            if (icon != null)
+                icon.Icon = value;
+        }
+    }
+
     public virtual Colour4 ButtonColor { get; set; } = FluXisColors.Background4;
     public Corner Corner { get; set; } = Corner.BottomLeft;
     public Action Action { get; set; }
     public bool ShowImmediately { get; set; }
+    public bool PlayClickSound { get; set; } = true;
 
     [Resolved]
     private UISamples samples { get; set; }
@@ -44,6 +58,7 @@ public partial class CornerButton : Container
     private Box hover;
     private Box flash;
 
+    private SpriteIcon icon;
     private FluXisSpriteText text;
 
     [BackgroundDependencyLoader]
@@ -64,7 +79,7 @@ public partial class CornerButton : Container
             _ => Anchor
         };
 
-        Shear = new Vector2(Corner is Corner.BottomLeft or Corner.TopLeft ? -.1f : .1f, 0);
+        Shear = new Vector2(Corner is Corner.BottomLeft or Corner.TopRight ? -.1f : .1f, 0);
         Position = new Vector2(Corner is Corner.BottomLeft or Corner.TopLeft ? -200 : 200, Corner is Corner.TopLeft or Corner.TopRight ? -corner_radius : corner_radius);
 
         InternalChildren = new Drawable[]
@@ -101,21 +116,21 @@ public partial class CornerButton : Container
                     Direction = FillDirection.Horizontal,
                     Anchor = Anchor.Centre,
                     Origin = Anchor.Centre,
-                    Spacing = new Vector2(10),
+                    Spacing = new Vector2(8),
                     Children = new Drawable[]
                     {
-                        new SpriteIcon
+                        icon = new SpriteIcon
                         {
                             Anchor = Anchor.CentreLeft,
                             Origin = Anchor.CentreLeft,
                             Icon = Icon,
-                            Size = new Vector2(24)
+                            Size = new Vector2(16)
                         },
                         text = new FluXisSpriteText
                         {
                             Anchor = Anchor.CentreLeft,
                             Origin = Anchor.CentreLeft,
-                            FontSize = 24,
+                            WebFontSize = 16,
                             Text = ButtonText
                         }
                     }
@@ -135,8 +150,11 @@ public partial class CornerButton : Container
     protected override bool OnClick(ClickEvent e)
     {
         flash.FadeOutFromOne(500);
+
+        if (PlayClickSound)
+            samples.Click();
+
         Action?.Invoke();
-        samples.Click();
         return true;
     }
 

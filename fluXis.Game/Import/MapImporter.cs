@@ -8,6 +8,7 @@ using fluXis.Game.Database.Maps;
 using fluXis.Game.Map;
 using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Overlay.Notifications.Tasks;
+using fluXis.Game.Utils;
 using osu.Framework.Platform;
 
 namespace fluXis.Game.Import;
@@ -116,7 +117,7 @@ public class MapImporter
     /// </returns>
     protected string CreatePackage(string name, string folder)
     {
-        string path = Path.Combine(Storage.GetFullPath("import"), name + ".fms");
+        string path = Path.Combine(Storage.GetFullPath("import"), PathUtils.RemoveAllInvalidPathCharacters(name) + ".fms");
         ZipFile.CreateFromDirectory(folder, path, CompressionLevel.NoCompression, false);
         return path;
     }

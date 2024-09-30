@@ -11,6 +11,7 @@ using fluXis.Game.Mods.Drawables;
 using fluXis.Game.Online.Activity;
 using fluXis.Game.UI.Tips;
 using osu.Framework.Allocation;
+using osu.Framework.Audio;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Shapes;
@@ -39,6 +40,8 @@ public partial class GameplayLoader : FluXisScreen
     private RealmMap map { get; }
     private List<IMod> mods { get; }
 
+    private AudioFilter lowPass;
+
     private Container loadingContainer;
     private FillFlowContainer content;
     private FluXisSpriteText tip;
@@ -51,7 +54,7 @@ public partial class GameplayLoader : FluXisScreen
     }
 
     [BackgroundDependencyLoader]
-    private void load()
+    private void load(AudioManager audio)
     {
         Anchor = Anchor.Centre;
         Origin = Anchor.Centre;
@@ -59,6 +62,7 @@ public partial class GameplayLoader : FluXisScreen
 
         InternalChildren = new Drawable[]
         {
+            lowPass = new AudioFilter(audio.TrackMixer),
             content = new FillFlowContainer
             {
                 AutoSizeAxes = Axes.Both,
@@ -257,7 +261,7 @@ public partial class GameplayLoader : FluXisScreen
             {
                 ValidForResume = false;
                 loadingContainer.FadeOut(FADE_DURATION);
-                clock.Delay(MOVE_DURATION).Schedule(() => clock.FadeOut(MOVE_DURATION));
+                clock.Delay(MOVE_DURATION).Schedule(() => clock.VolumeOut(MOVE_DURATION));
                 this.Delay(MOVE_DURATION * 2).Schedule(() =>
                 {
                     clock.Stop();
@@ -279,7 +283,7 @@ public partial class GameplayLoader : FluXisScreen
 
     public override bool OnExiting(ScreenExitEvent e)
     {
-        clock.FadeIn();
+        clock.VolumeIn(400, Easing.Out);
 
         if (fadeBackToGlobalClock)
             clock.Start();
@@ -300,7 +304,7 @@ public partial class GameplayLoader : FluXisScreen
             tip.FadeIn();
             content.MoveToY(0);
             loadingContainer.FadeIn(FADE_DURATION);
-            clock.LowPassFilter.CutoffTo(LowPassFilter.MIN, MOVE_DURATION, Easing.OutQuint);
+            lowPass.CutoffTo(AudioFilter.MIN, MOVE_DURATION, Easing.OutQuint);
         }
 
         tip.Text = LoadingTips.RandomTip;
@@ -310,7 +314,7 @@ public partial class GameplayLoader : FluXisScreen
     {
         this.Delay(MOVE_DURATION).FadeOut(FADE_DURATION);
         tip.FadeOut(FADE_DURATION);
-        clock.LowPassFilter.CutoffTo(LowPassFilter.MAX);
+        lowPass.CutoffTo(AudioFilter.MAX);
 
         if (moveDown)
             content.MoveToY(800, MOVE_DURATION + FADE_DURATION + 300, Easing.InQuint);

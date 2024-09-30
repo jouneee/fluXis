@@ -16,6 +16,9 @@ public class ScoreInfo
     [JsonProperty("score")]
     public int Score { get; set; }
 
+    [JsonProperty("pr")]
+    public double PerformanceRating { get; set; }
+
     [JsonProperty("combo")]
     public int Combo { get; set; }
 
@@ -52,6 +55,12 @@ public class ScoreInfo
     [JsonProperty("hash")]
     public string MapHash { get; set; } = "";
 
+    [JsonProperty("effect-hash")]
+    public string EffectHash { get; set; } = "";
+
+    [JsonProperty("sb-hash")]
+    public string StoryboardHash { get; set; } = "";
+
     [JsonProperty("mods")]
     public List<string> Mods { get; set; } = new();
 
@@ -62,7 +71,18 @@ public class ScoreInfo
     public long Timestamp { get; set; }
 
     [JsonProperty("ratio")]
-    public long Ratio => Flawless * 100 / (Perfect + Great + Alright + Okay + Miss);
+    public long Ratio
+    {
+        get
+        {
+            var nonFlawless = Perfect + Great + Alright + Okay + Miss;
+
+            if (nonFlawless == 0)
+                return 0;
+
+            return Flawless * 100 / nonFlawless;
+        }
+    }
 
     [JsonProperty("replay")]
     public Replay? Replay { get; set; }

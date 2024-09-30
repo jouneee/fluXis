@@ -1,8 +1,9 @@
+using System;
 using fluXis.Game.Configuration;
 using fluXis.Game.Map.Structures;
 using fluXis.Game.Screens.Edit.Tabs.Charting.Effect;
-using fluXis.Game.Screens.Edit.Tabs.Charting.Lines;
 using fluXis.Game.Screens.Edit.Tabs.Charting.Playfield.Tags;
+using fluXis.Game.Screens.Edit.Tabs.Shared.Lines;
 using fluXis.Game.Screens.Gameplay.Audio.Hitsounds;
 using fluXis.Game.Skinning.Default.Stage;
 using osu.Framework.Allocation;
@@ -12,10 +13,11 @@ using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Audio;
 using osu.Framework.Graphics.Containers;
+using osuTK;
 
 namespace fluXis.Game.Screens.Edit.Tabs.Charting.Playfield;
 
-public partial class EditorPlayfield : Container
+public partial class EditorPlayfield : Container, ITimePositionProvider
 {
     [Resolved]
     private EditorSettings settings { get; set; }
@@ -28,6 +30,8 @@ public partial class EditorPlayfield : Container
 
     [Resolved]
     private FluXisConfig config { get; set; }
+
+    public event Action<string> HitSoundPlayed;
 
     public EditorHitObjectContainer HitObjectContainer { get; private set; }
     public EditorEffectContainer Effects { get; private set; }
@@ -83,7 +87,7 @@ public partial class EditorPlayfield : Container
         base.Update();
 
         float songLengthInPixels = .5f * (clock.TrackLength * settings.Zoom);
-        float songTimeInPixels = -EditorHitObjectContainer.HITPOSITION - .5f * (-(float)(clock.CurrentTime + ChartingContainer.WAVEFORM_OFFSET) * settings.Zoom);
+        float songTimeInPixels = (float)(-EditorHitObjectContainer.HITPOSITION - .5f * (-(clock.CurrentTime + ChartingContainer.WAVEFORM_OFFSET) * settings.Zoom));
 
         waveform.Width = songLengthInPixels;
         waveform.Y = songTimeInPixels;
@@ -92,5 +96,13 @@ public partial class EditorPlayfield : Container
             hitSound.Volume.Value = config.Get<double>(FluXisSetting.HitSoundVolume);
     }
 
-    public void PlayHitSound(HitObject info) => hitsounding.GetSample(info.HitSound).Play();
+    public void PlayHitSound(HitObject info)
+    {
+        var channel = hitsounding.GetSample(info.HitSound);
+        channel.Play();
+        HitSoundPlayed?.Invoke(channel.SampleName);
+    }
+
+    public double TimeAtScreenSpacePosition(Vector2 pos) => HitObjectContainer.TimeAtScreenSpacePosition(pos);
+    public Vector2 ScreenSpacePositionAtTime(double time, int lane) => HitObjectContainer.ScreenSpacePositionAtTime(time, lane);
 }

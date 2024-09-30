@@ -2,6 +2,7 @@ using System;
 using fluXis.Game.Map.Structures;
 using fluXis.Game.Scoring;
 using fluXis.Game.Skinning;
+using fluXis.Game.Skinning.Bases.HitObjects;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
@@ -12,11 +13,11 @@ public partial class DrawableLongNotePart : CompositeDrawable
 {
     protected HitObject Data { get; }
 
-    public Action<float> OnJudgement { get; set; }
+    public Action<double> OnJudgement { get; set; }
     public Action OnMiss { get; set; }
 
     protected bool Missed => Time.Current > HitTime + HitWindows.TimingFor(HitWindows.Lowest);
-    protected virtual float HitTime => Data.Time;
+    protected virtual double HitTime => Data.Time;
     protected virtual HitWindows HitWindows => Screen.HitWindows;
 
     public bool Judged { get; private set; }
@@ -44,6 +45,12 @@ public partial class DrawableLongNotePart : CompositeDrawable
         Origin = Anchor.BottomCentre;
     }
 
+    public void ApplySnapColor(int idx)
+    {
+        var child = InternalChild as ICanHaveSnapColor;
+        child?.ApplySnapColor(idx, 0);
+    }
+
     protected override void Update()
     {
         base.Update();
@@ -58,10 +65,10 @@ public partial class DrawableLongNotePart : CompositeDrawable
             return;
 
         var offset = HitTime - Time.Current;
-        CheckJudgement(byUser, (float)offset);
+        CheckJudgement(byUser, offset);
     }
 
-    protected void CheckJudgement(bool byUser, float offset)
+    protected void CheckJudgement(bool byUser, double offset)
     {
         if (!byUser)
         {
@@ -80,7 +87,7 @@ public partial class DrawableLongNotePart : CompositeDrawable
         ApplyResult(offset);
     }
 
-    protected void ApplyResult(float offset)
+    protected void ApplyResult(double offset)
     {
         if (Judged)
             return;

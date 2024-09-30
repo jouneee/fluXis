@@ -5,7 +5,7 @@ namespace fluXis.Game.Scoring.Processing.Health;
 
 public class RequirementHeathProcessor : HealthProcessor
 {
-    protected override float DefaultHealth => 0f;
+    protected override double DefaultHealth => 0f;
     protected override bool ClearHealthOnFail => false;
 
     public float HealthRequirement { get; init; }
@@ -13,6 +13,11 @@ public class RequirementHeathProcessor : HealthProcessor
 
     private float multiplier = 1f;
     private const float miss_multiplier = 0.4f;
+
+    public RequirementHeathProcessor(float difficulty)
+        : base(difficulty)
+    {
+    }
 
     public override void ApplyMap(MapInfo map)
     {
@@ -22,12 +27,12 @@ public class RequirementHeathProcessor : HealthProcessor
 
     public override void AddResult(HitResult result)
     {
-        Health.Value += GetHealthIncreaseFor(result);
+        Health.Value += GetHealthIncreaseFor(result, Difficulty);
     }
 
-    protected override float GetHealthIncreaseFor(HitResult result)
+    protected override float GetHealthIncreaseFor(HitResult result, float difficulty)
     {
-        var increase = base.GetHealthIncreaseFor(result);
+        var increase = base.GetHealthIncreaseFor(result, difficulty);
 
         if (increase >= 0)
             increase *= multiplier;

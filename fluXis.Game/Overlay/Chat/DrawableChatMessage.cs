@@ -1,22 +1,26 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
+using fluXis.Game.Graphics.Containers;
 using fluXis.Game.Graphics.Drawables;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Graphics.UserInterface.Menus;
 using fluXis.Game.Graphics.UserInterface.Text;
-using fluXis.Game.Online.API.Models.Chat;
 using fluXis.Game.Online.Fluxel;
-using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Overlay.User;
 using fluXis.Game.Utils;
+using fluXis.Game.Utils.Extensions;
 using fluXis.Shared.API.Packets.Chat;
+using fluXis.Shared.Components.Chat;
 using fluXis.Shared.Utils.Extensions;
+using JetBrains.Annotations;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Sprites;
 using osu.Framework.Graphics.UserInterface;
 using osuTK;
 
@@ -28,10 +32,10 @@ public partial class DrawableChatMessage : Container
     private UserProfileOverlay profile { get; set; }
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
-    public ChatMessage InitialMessage { get; set; }
-    public List<ChatMessage> Messages { get; } = new();
+    public IChatMessage InitialMessage { get; set; }
+    public List<IChatMessage> Messages { get; } = new();
 
     private FillFlowContainer<MessageText> flow;
 
@@ -41,31 +45,28 @@ public partial class DrawableChatMessage : Container
         RelativeSizeAxes = Axes.X;
         AutoSizeAxes = Axes.Y;
 
-        ClickableContainer avatarContainer;
-
-        var nameColor = FluXisColors.Text;
-
-        if (InitialMessage.Sender.Groups.Any())
-        {
-            var group = InitialMessage.Sender.Groups.First();
-            nameColor = Colour4.TryParseHex(group.Color, out var c) ? c : FluXisColors.Text;
-        }
-
         InternalChildren = new Drawable[]
         {
-            avatarContainer = new ClickableContainer
+            new LoadWrapper<DrawableAvatar>
             {
-                Size = new Vector2(40),
+                Size = new Vector2(48),
                 Masking = true,
-                CornerRadius = 5,
-                Action = () => profile.ShowUser(InitialMessage.Sender.ID)
+                CornerRadius = 8,
+                LoadContent = () => new DrawableAvatar(InitialMessage.Sender)
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    ClickAction = () => profile.ShowUser(InitialMessage.Sender.ID),
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre
+                },
+                OnComplete = a => a.FadeInFromZero(400)
             },
             new FillFlowContainer
             {
                 RelativeSizeAxes = Axes.X,
                 AutoSizeAxes = Axes.Y,
                 Direction = FillDirection.Vertical,
-                Padding = new MarginPadding { Left = 50 },
+                Padding = new MarginPadding { Left = 48 + 12 },
                 Children = new Drawable[]
                 {
                     new FillFlowContainer
@@ -73,21 +74,17 @@ public partial class DrawableChatMessage : Container
                         RelativeSizeAxes = Axes.X,
                         AutoSizeAxes = Axes.Y,
                         Direction = FillDirection.Horizontal,
-                        Spacing = new Vector2(5),
-                        Children = new Drawable[]
+                        Spacing = new Vector2(4),
+                        Children = new[]
                         {
-                            new FluXisSpriteText
-                            {
-                                Text = InitialMessage.Sender.Username,
-                                FontSize = 22,
-                                Colour = nameColor
-                            },
+                            createIcon(),
+                            getName(InitialMessage.Sender.PreferredName).With(d => d.Anchor = d.Origin = Anchor.CentreLeft),
                             new FluXisTooltipText
                             {
                                 Text = getTime(),
                                 TooltipText = getTooltip(),
-                                FontSize = 18,
-                                Colour = FluXisColors.Text2,
+                                WebFontSize = 12,
+                                Alpha = .8f,
                                 Anchor = Anchor.CentreLeft,
                                 Origin = Anchor.CentreLeft
                             }
@@ -97,33 +94,22 @@ public partial class DrawableChatMessage : Container
                     {
                         RelativeSizeAxes = Axes.X,
                         AutoSizeAxes = Axes.Y,
-                        Direction = FillDirection.Vertical,
-                        Spacing = new Vector2(5)
+                        Direction = FillDirection.Vertical
                     }
                 }
             }
         };
 
-        LoadComponentAsync(new DrawableAvatar(InitialMessage.Sender)
-        {
-            RelativeSizeAxes = Axes.Both,
-            ShowTooltip = true
-        }, avatar =>
-        {
-            avatarContainer.Add(avatar);
-            avatar.FadeInFromZero(200);
-        });
-
         AddMessage(InitialMessage);
     }
 
-    public void AddMessage(ChatMessage message)
+    public void AddMessage(IChatMessage message)
     {
         Messages.Add(message);
         flow.Add(new MessageText
         {
             Message = message,
-            Fluxel = fluxel
+            API = api
         });
     }
 
@@ -131,6 +117,50 @@ public partial class DrawableChatMessage : Container
     {
         flow.Remove(flow.FirstOrDefault(m => m.Message.ID == id), true);
         Messages.Remove(Messages.FirstOrDefault(m => m.ID == id));
+    }
+
+    private Drawable createIcon()
+    {
+        var groups = InitialMessage.Sender.Groups;
+
+        if (groups.Count == 0)
+            return Empty().With(d => d.Alpha = 0);
+
+        return new SpriteIcon
+        {
+            Size = new Vector2(16),
+            Anchor = Anchor.CentreLeft,
+            Origin = Anchor.CentreLeft,
+            Colour = Colour4.FromHex(groups.First().Color),
+            Icon = groups.First().ID switch
+            {
+                "fa" => FontAwesome6.Solid.Star,
+                "purifier" => FontAwesome6.Solid.Diamond,
+                "moderators" => FontAwesome6.Solid.ShieldHalved,
+                "dev" => FontAwesome6.Solid.UserShield,
+                "bot" => FontAwesome6.Solid.UserAstronaut,
+                _ => FontAwesome6.Solid.User
+            }
+        };
+    }
+
+    private Drawable getName(string text)
+    {
+        if (InitialMessage.Sender.NamePaint is null)
+        {
+            return new FluXisTooltipText
+            {
+                Text = text,
+                WebFontSize = 16
+            };
+        }
+
+        return new GradientText
+        {
+            Text = text,
+            WebFontSize = 16,
+            Colour = InitialMessage.Sender.NamePaint.Colors.CreateColorInfo()
+        };
     }
 
     private string getTime()
@@ -154,45 +184,62 @@ public partial class DrawableChatMessage : Container
 
     private partial class MessageText : FluXisTextFlow, IHasContextMenu
     {
-        public ChatMessage Message { get; init; }
-        public FluxelClient Fluxel { get; init; }
+        public IChatMessage Message { get; init; }
+        public IAPIClient API { get; init; }
 
-        [Resolved]
-        private NotificationManager notifications { get; set; }
+        private const string link_regex = @"(http|https)://([\w-]+\.)+[\w-]+(/[\w- ./?%&=]*)?";
 
-        [BackgroundDependencyLoader]
-        private void load()
+        [BackgroundDependencyLoader(true)]
+        private void load([CanBeNull] FluXisGame game)
         {
-            FontSize = 18;
+            WebFontSize = 14;
             RelativeSizeAxes = Axes.X;
             AutoSizeAxes = Axes.Y;
-            AddText(Message.Content);
+
+            var words = Message.Content.Split(' ');
+
+            foreach (var word in words)
+            {
+                if (word.StartsWith('@')) // mention
+                {
+                    AddText(word, t => t.Colour = FluXisColors.Highlight);
+                }
+                else if (Regex.IsMatch(word, link_regex)) // link
+                {
+                    AddText<ClickableFluXisSpriteText>(word, t =>
+                    {
+                        t.Colour = FluXisColors.Link;
+                        t.Action = () => game?.OpenLink(word);
+                    });
+                }
+                else
+                    AddText(word);
+
+                AddText(" ");
+            }
         }
 
         public MenuItem[] ContextMenuItems
         {
             get
             {
-                List<MenuItem> items = new List<MenuItem>
-                {
-                    Fluxel.LoggedInUser?.CanModerate() ?? false
-                        ? new FluXisMenuItem("Delete", MenuItemType.Dangerous, delete)
-                        : new FluXisMenuItem("Report", MenuItemType.Dangerous, report)
-                };
+                var items = new List<MenuItem>();
 
+                if (API.User.Value?.CanModerate() ?? false)
+                    items.Add(new FluXisMenuItem("Delete", FontAwesome6.Solid.Trash, MenuItemType.Dangerous, delete));
+
+                items.Add(new FluXisMenuItem("Report", FontAwesome6.Solid.Flag, MenuItemType.Dangerous, report) { Enabled = () => false });
                 return items.ToArray();
             }
         }
 
         private async void delete()
         {
-            await Fluxel.SendPacket(ChatDeletePacket.Create(Message.ID));
+            await API.SendPacket(ChatDeletePacket.Create(Message.ID));
         }
 
-        private /* async*/ void report()
+        private void report()
         {
-            notifications.SendText("This feature is not yet implemented.");
-            // await Fluxel.SendPacket(new ChatMessageReportPacket { Id = Message.Id });
         }
     }
 }

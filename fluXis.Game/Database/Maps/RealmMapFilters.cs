@@ -1,3 +1,5 @@
+using System;
+using fluXis.Shared.Components.Maps;
 using Realms;
 
 namespace fluXis.Game.Database.Maps;
@@ -30,10 +32,21 @@ public class RealmMapFilters : RealmObject
         }
     }
 
-    // gimmick stuffs
-    public bool HasScrollVelocity { get; set; }
-    public bool HasLaneSwitch { get; set; }
-    public bool HasFlash { get; set; }
+    [MapTo(nameof(Effects))]
+    public string EffectsString { get; set; } = string.Empty;
+
+    [Ignored]
+    public MapEffectType Effects
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(EffectsString))
+                return 0;
+
+            return (MapEffectType)Enum.Parse(typeof(MapEffectType), EffectsString);
+        }
+        set => EffectsString = ((ulong)value).ToString();
+    }
 
     public void Reset()
     {
@@ -43,8 +56,7 @@ public class RealmMapFilters : RealmObject
         NoteCount = 0;
         LongNoteCount = 0;
         NotesPerSecond = 0;
-        HasScrollVelocity = false;
-        HasLaneSwitch = false;
-        HasFlash = false;
+        Effects = 0;
     }
 }
+

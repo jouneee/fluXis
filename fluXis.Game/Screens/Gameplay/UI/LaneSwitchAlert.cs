@@ -1,7 +1,7 @@
 using System;
 using fluXis.Game.Configuration;
 using fluXis.Game.Graphics.Sprites;
-using fluXis.Game.Map.Events;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Screens.Gameplay.Audio;
 using fluXis.Game.Screens.Gameplay.Ruleset;
 using osu.Framework.Allocation;
@@ -22,6 +22,9 @@ public partial class LaneSwitchAlert : Container
 
     [Resolved]
     private Playfield playfield { get; set; }
+
+    [Resolved]
+    private LaneSwitchManager laneSwitchManager { get; set; }
 
     private LaneSwitchEvent currentEvent;
 
@@ -46,7 +49,7 @@ public partial class LaneSwitchAlert : Container
                 {
                     leftIcon = new SpriteIcon
                     {
-                        Icon = FontAwesome6.Solid.ChevronLeft,
+                        Icon = FontAwesome6.Solid.AngleLeft,
                         RelativeSizeAxes = Axes.Both,
                         Anchor = Anchor.Centre,
                         Origin = Anchor.Centre,
@@ -63,7 +66,7 @@ public partial class LaneSwitchAlert : Container
                 {
                     rightIcon = new SpriteIcon
                     {
-                        Icon = FontAwesome6.Solid.ChevronRight,
+                        Icon = FontAwesome6.Solid.AngleRight,
                         RelativeSizeAxes = Axes.Both,
                         Anchor = Anchor.Centre,
                         Origin = Anchor.Centre,
@@ -85,7 +88,7 @@ public partial class LaneSwitchAlert : Container
         if (!config.Get<bool>(FluXisSetting.LaneSwitchAlerts)) return;
 
         if (currentEvent == null)
-            currentEvent = playfield.Manager.CurrentLaneSwitchEvent;
+            currentEvent = laneSwitchManager.Current;
         else
         {
             var time = clock.BeatTime;

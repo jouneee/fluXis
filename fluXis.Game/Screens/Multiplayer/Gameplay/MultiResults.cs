@@ -5,6 +5,7 @@ using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Buttons;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Input;
+using fluXis.Game.Localization;
 using fluXis.Game.Screens.Multiplayer.Gameplay.Results;
 using fluXis.Shared.Scoring;
 using osu.Framework.Allocation;
@@ -94,8 +95,8 @@ public partial class MultiResults : FluXisScreen, IKeyBindingHandler<FluXisGloba
             },
             backButton = new CornerButton
             {
-                ButtonText = "Back",
-                Icon = FontAwesome6.Solid.ChevronLeft,
+                ButtonText = LocalizationStrings.General.Back,
+                Icon = FontAwesome6.Solid.AngleLeft,
                 Action = this.Exit
             }
         };

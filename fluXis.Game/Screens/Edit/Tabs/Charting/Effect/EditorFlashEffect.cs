@@ -1,6 +1,6 @@
 using System;
 using fluXis.Game.Graphics.UserInterface.Panel;
-using fluXis.Game.Map.Events;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Screens.Edit.Tabs.Charting.Effect.EffectEdit;
 using osu.Framework.Allocation;
 using osu.Framework.Extensions.Color4Extensions;
@@ -67,8 +67,8 @@ public partial class EditorFlashEvent : Container
             return;
         }
 
-        Y = -((FlashEvent.Time - (float)clock.CurrentTime) * settings.Zoom) * 0.5f;
-        line.Height = .5f * (FlashEvent.Duration * settings.Zoom);
+        Y = (float)(-((FlashEvent.Time - (float)clock.CurrentTime) * settings.Zoom) * 0.5f);
+        line.Height = (float)(.5f * (FlashEvent.Duration * settings.Zoom));
         line.Height = Math.Max(line.Height, 10);
         line.Child.Colour = Colour = ColourInfo.GradientVertical(FlashEvent.EndColor.Opacity(FlashEvent.EndOpacity), FlashEvent.StartColor.Opacity(FlashEvent.StartOpacity));
     }

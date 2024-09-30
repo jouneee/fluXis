@@ -1,33 +1,55 @@
 using fluXis.Game.Audio;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Color;
+using fluXis.Game.Graphics.UserInterface.Menus;
+using fluXis.Game.Online.Chat;
 using osu.Framework.Allocation;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
 using osu.Framework.Input.Events;
 using osuTK;
+using osuTK.Input;
 
 namespace fluXis.Game.Overlay.Chat.UI;
 
-public partial class ChatChannelButton : Container
+public partial class ChatChannelButton : Container, IHasContextMenu
 {
-    public string Channel { get; set; }
+    public ChatChannel Channel { get; }
     public IconUsage Icon { get; set; } = FontAwesome6.Solid.Hashtag;
+
+    public MenuItem[] ContextMenuItems => new MenuItem[]
+    {
+        new FluXisMenuItem("Leave Channel", FontAwesome6.Solid.DoorOpen, MenuItemType.Dangerous, leave)
+    };
+
+    private Bindable<string> bind { get; }
 
     [Resolved]
     private UISamples samples { get; set; }
+
+    [Resolved]
+    private ChatClient client { get; set; }
 
     private Box hover;
     private Box flash;
     private Container content;
 
+    public ChatChannelButton(ChatChannel channel, Bindable<string> bind)
+    {
+        Channel = channel;
+        this.bind = bind;
+    }
+
     [BackgroundDependencyLoader]
     private void load()
     {
         RelativeSizeAxes = Axes.X;
-        Height = 50;
+        Height = 48;
 
         InternalChildren = new Drawable[]
         {
@@ -36,7 +58,7 @@ public partial class ChatChannelButton : Container
                 RelativeSizeAxes = Axes.Both,
                 Anchor = Anchor.Centre,
                 Origin = Anchor.Centre,
-                CornerRadius = 10,
+                CornerRadius = 8,
                 Masking = true,
                 Children = new Drawable[]
                 {
@@ -59,8 +81,8 @@ public partial class ChatChannelButton : Container
                     {
                         AutoSizeAxes = Axes.Both,
                         Direction = FillDirection.Horizontal,
-                        Spacing = new Vector2(10),
-                        Padding = new MarginPadding(20),
+                        Spacing = new Vector2(8),
+                        Padding = new MarginPadding(14),
                         Anchor = Anchor.CentreLeft,
                         Origin = Anchor.CentreLeft,
                         Children = new Drawable[]
@@ -74,7 +96,8 @@ public partial class ChatChannelButton : Container
                             },
                             new FluXisSpriteText
                             {
-                                Text = Channel,
+                                Text = Channel.Name,
+                                WebFontSize = 14,
                                 Anchor = Anchor.CentreLeft,
                                 Origin = Anchor.CentreLeft
                             }
@@ -89,18 +112,22 @@ public partial class ChatChannelButton : Container
     {
         flash.FadeOutFromOne(1000, Easing.OutQuint);
         samples.Click();
+        bind.Value = Channel.Name;
         return true;
     }
 
     protected override bool OnMouseDown(MouseDownEvent e)
     {
-        content.ScaleTo(.9f, 1000, Easing.OutQuint);
+        if (e.Button != MouseButton.Left)
+            return false;
+
+        content.ScaleTo(.95f, 1000, Easing.OutQuint);
         return true;
     }
 
     protected override void OnMouseUp(MouseUpEvent e)
     {
-        content.ScaleTo(1f, 1000, Easing.OutElastic);
+        content.ScaleTo(1f, 800, Easing.OutElasticHalf);
     }
 
     protected override bool OnHover(HoverEvent e)
@@ -114,4 +141,6 @@ public partial class ChatChannelButton : Container
     {
         hover.FadeOut(200);
     }
+
+    private void leave() => client.LeaveChannel(Channel.Name);
 }

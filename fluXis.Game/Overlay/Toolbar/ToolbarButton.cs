@@ -7,7 +7,9 @@ using fluXis.Game.Input;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.Mouse;
 using fluXis.Game.Utils;
+using fluXis.Shared.Components.Users;
 using osu.Framework.Allocation;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Cursor;
@@ -36,7 +38,7 @@ public partial class ToolbarButton : ClickableContainer, IHasCustomTooltip<Toolb
     private UISamples samples { get; set; }
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     [Resolved]
     private FluXisRealm realm { get; set; }
@@ -104,8 +106,7 @@ public partial class ToolbarButton : ClickableContainer, IHasCustomTooltip<Toolb
 
         if (!RequireLogin) return;
 
-        fluxel.OnUserChanged += _ => Schedule(updateState);
-        updateState();
+        api.User.BindValueChanged(updateState, true);
     }
 
     protected override bool OnHover(HoverEvent e)
@@ -143,7 +144,8 @@ public partial class ToolbarButton : ClickableContainer, IHasCustomTooltip<Toolb
 
     protected void SetLineState(bool state) => line.ResizeWidthTo(state ? 1 : 0, 400, Easing.OutQuint);
 
-    private void updateState() => Enabled.Value = fluxel.LoggedInUser != null;
+    private void updateState(ValueChangedEvent<APIUser> valueChangedEvent)
+        => Schedule(() => Enabled.Value = api.User.Value != null);
 
     public ITooltip<ToolbarButton> GetCustomTooltip() => new ToolbarButtonTooltip();
 

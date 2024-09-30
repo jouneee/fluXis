@@ -1,4 +1,5 @@
 using fluXis.Game.Audio;
+using fluXis.Game.Graphics.Containers;
 using fluXis.Game.Graphics.Drawables;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface;
@@ -6,11 +7,15 @@ using fluXis.Game.Graphics.UserInterface.Buttons;
 using fluXis.Game.Graphics.UserInterface.Buttons.Presets;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Graphics.UserInterface.Panel;
+using fluXis.Game.Localization;
 using fluXis.Game.Online.Fluxel;
-using fluXis.Game.Overlay.Login;
+using fluXis.Game.Overlay.Auth;
 using fluXis.Game.Overlay.User;
+using fluXis.Game.Screens;
+using fluXis.Game.Utils.Extensions;
 using fluXis.Shared.Components.Users;
 using osu.Framework.Allocation;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Cursor;
@@ -23,7 +28,7 @@ using osuTK.Input;
 
 namespace fluXis.Game.Overlay.Toolbar;
 
-public partial class ToolbarProfile : Container, IHasTooltip
+public partial class ToolbarProfile : VisibilityContainer, IHasTooltip
 {
     public LocalisableString TooltipText => loadingContainer.Alpha > 0 ? "Connecting..." : "";
 
@@ -34,7 +39,7 @@ public partial class ToolbarProfile : Container, IHasTooltip
     private LoginOverlay loginOverlay { get; set; }
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     [Resolved]
     private PanelContainer panels { get; set; }
@@ -55,7 +60,7 @@ public partial class ToolbarProfile : Container, IHasTooltip
     {
         AutoSizeAxes = Axes.Both;
 
-        APIUserShort user = fluxel.LoggedInUser;
+        var user = api.User.Value;
 
         Children = new Drawable[]
         {
@@ -94,11 +99,21 @@ public partial class ToolbarProfile : Container, IHasTooltip
                                 Size = new Vector2(40),
                                 Children = new Drawable[]
                                 {
-                                    avatarContainer = new Container
+                                    new LoadWrapper<DrawableAvatar>
                                     {
                                         RelativeSizeAxes = Axes.Both,
                                         CornerRadius = 5,
-                                        Masking = true
+                                        Masking = true,
+                                        LoadContent = () => avatar = new DrawableAvatar(user)
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                            Anchor = Anchor.Centre,
+                                            Origin = Anchor.Centre
+                                        }
+                                    },
+                                    avatarContainer = new Container
+                                    {
+                                        RelativeSizeAxes = Axes.Both
                                     },
                                     loadingContainer = new Container
                                     {
@@ -124,7 +139,7 @@ public partial class ToolbarProfile : Container, IHasTooltip
                             },
                             arrow = new SpriteIcon
                             {
-                                Icon = FontAwesome6.Solid.ChevronDown,
+                                Icon = FontAwesome6.Solid.AngleDown,
                                 Size = new Vector2(10),
                                 Y = 40,
                                 Anchor = Anchor.TopCentre,
@@ -137,45 +152,43 @@ public partial class ToolbarProfile : Container, IHasTooltip
             }
         };
 
-        LoadComponentAsync(avatar = new DrawableAvatar(user)
-        {
-            RelativeSizeAxes = Axes.Both,
-            Anchor = Anchor.Centre,
-            Origin = Anchor.Centre
-        }, avatarContainer.Add);
-
-        fluxel.OnUserChanged += updateUser;
+        api.User.BindValueChanged(updateUser);
     }
 
     protected override void LoadComplete()
     {
         base.LoadComplete();
 
-        fluxel.OnStatusChanged += status =>
-        {
-            Schedule(() =>
-            {
-                switch (status)
-                {
-                    case ConnectionStatus.Offline:
-                    case ConnectionStatus.Online:
-                    case ConnectionStatus.Closed:
-                        loadingContainer.FadeOut(200);
-                        break;
-
-                    case ConnectionStatus.Reconnecting:
-                    case ConnectionStatus.Connecting:
-                    case ConnectionStatus.Failing:
-                        loadingContainer.FadeIn(200);
-                        break;
-                }
-            });
-        };
+        api.Status.BindValueChanged(updateStatus, true);
     }
 
-    private void updateUser(APIUserShort user)
+    protected override void PopIn() => container.MoveToY(-10, FluXisScreen.MOVE_DURATION, Easing.OutQuint);
+    protected override void PopOut() => container.MoveToY(-20, FluXisScreen.MOVE_DURATION, Easing.OutQuint);
+
+    private void updateStatus(ValueChangedEvent<ConnectionStatus> e)
     {
-        avatar.UpdateUser(user);
+        Scheduler.ScheduleIfNeeded(() =>
+        {
+            switch (e.NewValue)
+            {
+                case ConnectionStatus.Offline:
+                case ConnectionStatus.Online:
+                case ConnectionStatus.Closed:
+                    loadingContainer.FadeOut(200);
+                    break;
+
+                case ConnectionStatus.Reconnecting:
+                case ConnectionStatus.Connecting:
+                case ConnectionStatus.Failing:
+                    loadingContainer.FadeIn(200);
+                    break;
+            }
+        });
+    }
+
+    private void updateUser(ValueChangedEvent<APIUser> e)
+    {
+        avatar.UpdateUser(e.NewValue);
     }
 
     protected override bool OnMouseDown(MouseDownEvent e)
@@ -188,8 +201,8 @@ public partial class ToolbarProfile : Container, IHasTooltip
             Text = "Are you sure you want to log out?",
             Buttons = new ButtonData[]
             {
-                new DangerButtonData(ButtonPanel.COMMON_CONFIRM, () => fluxel.Logout()),
-                new CancelButtonData(ButtonPanel.COMMON_CANCEL)
+                new DangerButtonData(LocalizationStrings.General.PanelGenericConfirm, () => api.Logout()),
+                new CancelButtonData()
             }
         };
 
@@ -201,14 +214,14 @@ public partial class ToolbarProfile : Container, IHasTooltip
         flash.FadeOutFromOne(1000, Easing.OutQuint);
         samples.Click();
 
-        if (fluxel.LoggedInUser == null)
+        if (api.User.Value == null)
             loginOverlay.Show();
         else
         {
             if (profile.State.Value == Visibility.Visible)
                 profile.Hide();
             else
-                profile.ShowUser(fluxel.LoggedInUser.ID);
+                profile.ShowUser(api.User.Value.ID);
         }
 
         return true;

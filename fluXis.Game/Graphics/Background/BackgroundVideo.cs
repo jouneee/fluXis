@@ -1,7 +1,5 @@
 using System;
-using System.IO;
 using fluXis.Game.Configuration;
-using fluXis.Game.Database;
 using fluXis.Game.Database.Maps;
 using fluXis.Game.Map;
 using osu.Framework.Allocation;
@@ -11,17 +9,20 @@ using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Video;
 using osu.Framework.Logging;
+using osu.Framework.Timing;
 
 namespace fluXis.Game.Graphics.Background;
 
 public partial class BackgroundVideo : CompositeDrawable
 {
+    public IFrameBasedClock VideoClock { get; set; }
     public bool ShowDim { get; init; } = true;
 
     public RealmMap Map { get; set; }
     public MapInfo Info { get; set; }
 
     public bool IsPlaying { get; private set; }
+    private bool waitingForLoad;
 
     private Container videoContainer;
     private Video video;
@@ -86,15 +87,14 @@ public partial class BackgroundVideo : CompositeDrawable
             return;
         }
 
-        var file = Map.MapSet.GetPathForFile(Info.VideoFile);
-
-        if (file == null) return;
-
         try
         {
-            var path = MapFiles.GetFullPath(file);
-            Logger.Log($"Loading video: {path}", LoggingTarget.Runtime, LogLevel.Debug);
-            Stream stream = File.OpenRead(path);
+            var stream = Info?.GetVideoStream();
+
+            if (stream == null)
+                return;
+
+            waitingForLoad = true;
 
             Schedule(() =>
             {
@@ -108,12 +108,14 @@ public partial class BackgroundVideo : CompositeDrawable
                 {
                     Logger.Log("Video loaded, adding to scene tree.", LoggingTarget.Runtime, LogLevel.Debug);
                     videoContainer.Child = loadedVideo;
+                    waitingForLoad = false;
                 });
             });
         }
         catch (Exception e)
         {
-            Logger.Error(e, $"Failed to load video: {file}");
+            Logger.Error(e, "Failed to load video!");
+            waitingForLoad = false;
         }
     }
 
@@ -123,14 +125,19 @@ public partial class BackgroundVideo : CompositeDrawable
 
         if (video is not { IsLoaded: true }) return;
 
-        if (Clock.CurrentTime > video.Duration)
+        var clock = VideoClock ?? Clock;
+
+        if (clock.CurrentTime > 2000 && Alpha == 0 && IsPlaying)
+            this.FadeIn(500); // workaround for editor playtesting
+
+        if (clock.CurrentTime > video.Duration)
         {
             this.FadeOut(500);
             return;
         }
 
         if (IsPlaying)
-            video.PlaybackPosition = Clock.CurrentTime;
+            video.PlaybackPosition = clock.CurrentTime;
     }
 
     public void Stop()
@@ -151,7 +158,13 @@ public partial class BackgroundVideo : CompositeDrawable
 
     public void Start()
     {
-        if (video == null) return;
+        if (video == null)
+        {
+            if (waitingForLoad)
+                Schedule(Start);
+
+            return;
+        }
 
         if (!video.IsLoaded)
         {

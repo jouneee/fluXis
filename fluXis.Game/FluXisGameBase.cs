@@ -21,17 +21,16 @@ using fluXis.Game.IO;
 using fluXis.Game.Localization;
 using fluXis.Game.Map;
 using fluXis.Game.Online;
-using fluXis.Game.Online.Activity;
 using fluXis.Game.Online.API.Models.Chat;
 using fluXis.Game.Online.API.Models.Groups;
-using fluXis.Game.Online.API.Models.Maps;
 using fluXis.Game.Online.API.Models.Multi;
-using fluXis.Game.Online.API.Models.Users;
+using fluXis.Game.Online.Chat;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Online.Multiplayer;
 using fluXis.Game.Overlay.Mouse;
 using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Plugins;
+using fluXis.Game.Scoring;
 using fluXis.Game.Screens.Edit.Input;
 using fluXis.Game.Screens.Gameplay.HUD;
 using fluXis.Game.Screens.Menu;
@@ -43,7 +42,6 @@ using fluXis.Game.Utils;
 using fluXis.Resources;
 using fluXis.Shared.Components.Chat;
 using fluXis.Shared.Components.Groups;
-using fluXis.Shared.Components.Maps;
 using fluXis.Shared.Components.Multi;
 using fluXis.Shared.Components.Users;
 using fluXis.Shared.Scoring;
@@ -53,6 +51,7 @@ using osu.Framework.Bindables;
 using osu.Framework.Configuration;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Input;
 using osu.Framework.IO.Stores;
 using osu.Framework.Localisation;
 using osu.Framework.Logging;
@@ -82,17 +81,21 @@ public partial class FluXisGameBase : osu.Framework.Game
 
     protected FluXisConfig Config { get; private set; }
     protected NotificationManager NotificationManager { get; private set; }
-    protected FluxelClient Fluxel { get; private set; }
+    protected IAPIClient APIClient { get; private set; }
     protected MapStore MapStore { get; private set; }
     protected SkinManager SkinManager { get; private set; }
     protected GlobalCursorOverlay CursorOverlay { get; private set; }
 
+    public PluginManager Plugins { get; private set; }
     public MenuScreen MenuScreen { get; protected set; }
 
     private KeybindStore keybindStore;
     private ImportManager importManager;
 
-    protected Bindable<UserActivity> Activity { get; } = new();
+    private Storage exportStorage;
+
+    public Storage ExportStorage => exportStorage ??= Host.Storage.GetStorageForDirectory("export");
+
     public Season CurrentSeason { get; private set; }
 
     public static string VersionString
@@ -119,16 +122,15 @@ public partial class FluXisGameBase : osu.Framework.Game
     public static Version Version => Assembly.GetEntryAssembly()?.GetName().Version;
     public static bool IsDebug => Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration == "Debug";
 
+    public string ClientHash { get; private set; }
+
     public virtual LightController CreateLightController() => new();
     public virtual IUpdatePerformer CreateUpdatePerformer() => null;
 
     protected FluXisGameBase()
     {
-        JsonUtils.RegisterTypeConversion<IAPIUser, APIUser>();
-        JsonUtils.RegisterTypeConversion<IAPIUserSocials, APIUser.APIUserSocials>();
         JsonUtils.RegisterTypeConversion<IMultiplayerParticipant, MultiplayerParticipant>();
         JsonUtils.RegisterTypeConversion<IAPIGroup, APIGroup>();
-        JsonUtils.RegisterTypeConversion<IAPIMapShort, APIMapShort>();
         JsonUtils.RegisterTypeConversion<IMultiplayerRoom, MultiplayerRoom>();
         JsonUtils.RegisterTypeConversion<IMultiplayerRoomSettings, MultiplayerRoomSettings>();
         JsonUtils.RegisterTypeConversion<IChatMessage, ChatMessage>();
@@ -137,6 +139,17 @@ public partial class FluXisGameBase : osu.Framework.Game
     [BackgroundDependencyLoader]
     private void load(Storage storage, FrameworkConfigManager frameworkConfig)
     {
+        try
+        {
+            using var fs = File.OpenRead(typeof(FluXisGameBase).Assembly.Location);
+            ClientHash = MapUtils.GetHash(fs);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to get client hash!");
+            ClientHash = MapUtils.GetHash(VersionString);
+        }
+
         frameworkLocale = frameworkConfig.GetBindable<string>(FrameworkSetting.Locale);
         frameworkLocale.BindValueChanged(_ => updateLanguage());
 
@@ -167,21 +180,26 @@ public partial class FluXisGameBase : osu.Framework.Game
 
         cacheComponent(NotificationManager = new NotificationManager());
 
-        cacheComponent(Fluxel = new FluxelClient(endpoint), true, true);
+        cacheComponent(APIClient = new FluxelClient(endpoint), true, true);
+        cacheComponent(APIClient as FluxelClient);
         cacheComponent<MultiplayerClient>(new OnlineMultiplayerClient(), true, true);
+        cacheComponent(new ChatClient(), true, true);
 
-        UserCache.Init(Fluxel);
+        var users = new UserCache();
+        cacheComponent(users, true, true);
 
         cacheComponent(new BackgroundTextureStore(Host, mapStorage));
         cacheComponent(new CroppedBackgroundStore(Host, mapStorage));
-        cacheComponent(new OnlineTextureStore(Host, endpoint));
+        cacheComponent(new OnlineTextureStore(Host, endpoint, users));
 
-        cacheComponent(MapStore = new MapStore(), true);
+        cacheComponent(MapStore = new MapStore(), true, true);
+        cacheComponent(new ScoreManager(), true, true);
         cacheComponent(new ReplayStorage(storage.GetStorageForDirectory("replays")));
 
-        cacheComponent(new PluginManager(), true);
+        cacheComponent(Plugins = new PluginManager(), true);
         cacheComponent(importManager = new ImportManager(), true, true);
         cacheComponent(SkinManager = new SkinManager(), true, true);
+        cacheComponent<ISkin>(SkinManager);
         cacheComponent(new LayoutManager(), true);
         cacheComponent(new PreviewManager(), true);
 
@@ -271,26 +289,15 @@ public partial class FluXisGameBase : osu.Framework.Game
         }, true);
     }
 
-    public void PerformUpdateCheck(bool silent, bool forceUpdate = false)
+    public void PerformUpdateCheck(bool silent) => Task.Run(() =>
     {
-        Task.Run(() =>
-        {
-            var checker = new UpdateChecker(Config.Get<ReleaseChannel>(FluXisSetting.ReleaseChannel));
+        var performer = CreateUpdatePerformer();
 
-            if (forceUpdate || checker.UpdateAvailable)
-            {
-                var performer = CreateUpdatePerformer();
-                var version = checker.LatestVersion;
+        if (performer is null)
+            return;
 
-                if (performer != null)
-                    performer.Perform(version);
-                else
-                    NotificationManager.SendText($"New update available! ({version})", "Check the github releases to download the latest version.", FontAwesome6.Solid.Download);
-            }
-            else if (!silent)
-                NotificationManager.SendText("No updates available.", "You are running the latest version.", FontAwesome6.Solid.Check);
-        });
-    }
+        performer.Perform(silent, Config.Get<ReleaseChannel>(FluXisSetting.ReleaseChannel) == ReleaseChannel.Beta);
+    });
 
     private Season getSeason()
     {
@@ -298,8 +305,8 @@ public partial class FluXisGameBase : osu.Framework.Game
 
         return date switch
         {
-            { Month: 7 } or { Month: 8 } or { Month: 9 } => Season.Summer,
-            { Month: 10, Day: >= 18 } => Season.Halloween,
+            { Month: 7 } or { Month: 8 } or { Month: 9, Day: <= 7 } => Season.Summer,
+            { Month: 10, Day: >= 14 } => Season.Halloween,
             { Month: 12 } or { Month: 1 } => Season.Winter,
             _ => Season.Normal
         };
@@ -340,11 +347,18 @@ public partial class FluXisGameBase : osu.Framework.Game
         // Resharper restore StringLiteralTypo
     }
 
-    public new virtual void Exit()
+    public new void Exit() => Exit(false);
+
+    public virtual void Exit(bool restart)
     {
-        Fluxel.Close();
+        if (restart && !RestartOnClose())
+            return;
+
+        APIClient.Disconnect();
         base.Exit();
     }
+
+    protected virtual bool RestartOnClose() => false;
 
     public override void SetHost(GameHost host)
     {
@@ -355,14 +369,20 @@ public partial class FluXisGameBase : osu.Framework.Game
             exceptionCount++;
             Task.Delay(1000).ContinueWith(_ => exceptionCount--);
 
-            NotificationManager.SendError("An unhandled error occurred!", e.Message, FontAwesome6.Solid.Bomb);
+            NotificationManager.SendError("An unhandled error occurred!", IsDebug ? e.Message : "This has been automatically reported to the developers.", FontAwesome6.Solid.Bomb);
             return exceptionCount <= MaxExceptions;
         };
     }
 
+    protected override IDictionary<FrameworkSetting, object> GetFrameworkConfigDefaults() => new Dictionary<FrameworkSetting, object>
+    {
+        { FrameworkSetting.VolumeUniversal, .15d },
+        { FrameworkSetting.ConfineMouseMode, ConfineMouseMode.Never }
+    };
+
     protected override bool OnExiting()
     {
-        Fluxel.Close();
+        APIClient.Disconnect();
         return base.OnExiting();
     }
 
@@ -395,7 +415,7 @@ public partial class FluXisGameBase : osu.Framework.Game
     }
 
     public virtual void CloseOverlays() { }
-    public virtual void PresentScore(RealmMap map, ScoreInfo score, APIUserShort player) { }
+    public virtual void PresentScore(RealmMap map, ScoreInfo score, APIUser player) { }
     public virtual void ShowMap(RealmMapSet map) { }
 
     protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent) => GameDependencies = new DependencyContainer(base.CreateChildDependencies(parent));

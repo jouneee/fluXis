@@ -4,12 +4,14 @@ using fluXis.Game.Graphics.Containers;
 using fluXis.Game.Graphics.Drawables;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Color;
+using fluXis.Game.Graphics.UserInterface.Text;
 using fluXis.Game.Online.API.Models.Groups;
-using fluXis.Game.Online.API.Models.Users;
 using fluXis.Game.Online.Drawables;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.User.Header;
 using fluXis.Game.Utils;
+using fluXis.Game.Utils.Extensions;
+using fluXis.Shared.Components.Users;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
@@ -23,17 +25,21 @@ public partial class ProfileHeader : Container
 {
     private APIUser user { get; }
 
+    private bool showUsername => user.Username != user.PreferredName;
+    private bool showPronouns => !string.IsNullOrEmpty(user.Pronouns);
+    private bool showBottomRow => showUsername || showPronouns;
+
     public ProfileHeader(APIUser user)
     {
         this.user = user;
     }
 
     [BackgroundDependencyLoader]
-    private void load(FluxelClient fluxel)
+    private void load(IAPIClient api)
     {
         RelativeSizeAxes = Axes.X;
-        Height = 440;
-        CornerRadius = 20;
+        Height = 420; // this is changed in Update()
+        CornerRadius = 24;
         Masking = true;
 
         InternalChildren = new Drawable[]
@@ -63,16 +69,17 @@ public partial class ProfileHeader : Container
                 Origin = Anchor.Centre,
                 Direction = FillDirection.Vertical,
                 Spacing = new Vector2(20),
+                Padding = new MarginPadding { Horizontal = 40 },
                 Children = new Drawable[]
                 {
                     new GridContainer
                     {
                         RelativeSizeAxes = Axes.X,
-                        Height = 120,
+                        Height = 128,
                         ColumnDimensions = new[]
                         {
-                            new Dimension(GridSizeMode.Absolute, 120),
-                            new Dimension(GridSizeMode.Absolute, 10),
+                            new Dimension(GridSizeMode.Absolute, 128),
+                            new Dimension(GridSizeMode.Absolute, 12),
                             new Dimension()
                         },
                         Content = new[]
@@ -81,8 +88,8 @@ public partial class ProfileHeader : Container
                             {
                                 new LoadWrapper<DrawableAvatar>
                                 {
-                                    Size = new Vector2(120),
-                                    CornerRadius = 20,
+                                    Size = new Vector2(128),
+                                    CornerRadius = 24,
                                     Masking = true,
                                     EdgeEffect = FluXisStyles.ShadowMedium,
                                     LoadContent = () => new DrawableAvatar(user)
@@ -114,7 +121,7 @@ public partial class ProfileHeader : Container
                                                 {
                                                     AutoSizeAxes = Axes.Both,
                                                     Direction = FillDirection.Horizontal,
-                                                    Spacing = new Vector2(10),
+                                                    Spacing = new Vector2(12),
                                                     ChildrenEnumerable = user.Groups.Any()
                                                         ? user.Groups.Select(g => new HeaderGroupChip(g))
                                                         : new Drawable[]
@@ -139,23 +146,47 @@ public partial class ProfileHeader : Container
                                             RelativeSizeAxes = Axes.X,
                                             AutoSizeAxes = Axes.Y,
                                             Direction = FillDirection.Horizontal,
-                                            Spacing = new Vector2(10),
+                                            Spacing = new Vector2(12),
                                             Children = new Drawable[]
                                             {
-                                                new FluXisSpriteText
+                                                new ClubTag(user.Club)
                                                 {
-                                                    Text = user.PreferredName,
-                                                    WebFontSize = 48,
+                                                    Alpha = user.Club?.ID > 0 ? 1 : 0,
                                                     Shadow = true,
+                                                    WebFontSize = 30,
                                                     Anchor = Anchor.CentreLeft,
                                                     Origin = Anchor.CentreLeft
                                                 },
-                                                new FluXisSpriteText
+                                                getName(user.PreferredName).With(d => d.Anchor = d.Origin = Anchor.CentreLeft)
+                                            }
+                                        },
+                                        new FillFlowContainer
+                                        {
+                                            RelativeSizeAxes = Axes.X,
+                                            AutoSizeAxes = Axes.Y,
+                                            Direction = FillDirection.Horizontal,
+                                            Spacing = new Vector2(12),
+                                            Alpha = showBottomRow ? 1 : 0,
+                                            Margin = new MarginPadding { Top = -8 },
+                                            Children = new Drawable[]
+                                            {
+                                                new FluXisTooltipText()
                                                 {
                                                     Text = user.Username,
+                                                    TooltipText = "Username",
                                                     WebFontSize = 24,
                                                     Shadow = true,
-                                                    Alpha = string.IsNullOrEmpty(user.DisplayName) ? 0 : .8f,
+                                                    Alpha = showUsername ? .8f : 0,
+                                                    Anchor = Anchor.CentreLeft,
+                                                    Origin = Anchor.CentreLeft
+                                                },
+                                                new FluXisTooltipText()
+                                                {
+                                                    Text = user.Pronouns,
+                                                    TooltipText = "Pronouns",
+                                                    WebFontSize = 20,
+                                                    Shadow = true,
+                                                    Alpha = showPronouns ? .6f : 0,
                                                     Anchor = Anchor.CentreLeft,
                                                     Origin = Anchor.CentreLeft
                                                 }
@@ -183,7 +214,7 @@ public partial class ProfileHeader : Container
                                 {
                                     new HeaderPlacementChip
                                     {
-                                        Placement = user.GlobalRank,
+                                        Placement = user.Statistics!.GlobalRank,
                                         CreateIcon = () => new SpriteIcon
                                         {
                                             Icon = FontAwesome6.Solid.EarthAmericas,
@@ -192,7 +223,7 @@ public partial class ProfileHeader : Container
                                     },
                                     new HeaderPlacementChip
                                     {
-                                        Placement = user.CountryRank,
+                                        Placement = user.Statistics!.CountryRank,
                                         CreateIcon = () => new DrawableCountry(user.GetCountry())
                                         {
                                             Size = new Vector2(20)
@@ -215,7 +246,7 @@ public partial class ProfileHeader : Container
                                     {
                                         Icon = FontAwesome6.Solid.ShareNodes
                                     },
-                                    fluxel.LoggedInUser?.ID == user.ID
+                                    api.User.Value?.ID == user.ID
                                         ? new HeaderEditButton()
                                         : new HeaderFollowButton(user)
                                 }
@@ -224,6 +255,32 @@ public partial class ProfileHeader : Container
                     }
                 }
             }
+        };
+    }
+
+    protected override void Update()
+    {
+        Height = DrawWidth / 3f; // 3:1 aspect ratio
+    }
+
+    private Drawable getName(string text)
+    {
+        if (user.NamePaint is null)
+        {
+            return new FluXisTooltipText
+            {
+                Text = text,
+                WebFontSize = 48,
+                Shadow = true
+            };
+        }
+
+        return new GradientText
+        {
+            Text = text,
+            WebFontSize = 48,
+            Shadow = true,
+            Colour = user.NamePaint.Colors.CreateColorInfo()
         };
     }
 
@@ -255,7 +312,7 @@ public partial class ProfileHeader : Container
                 },
                 new FluXisSpriteText
                 {
-                    Text = TimeUtils.Ago(TimeUtils.GetFromSeconds(user.LastLogin)),
+                    Text = TimeUtils.Ago(TimeUtils.GetFromSeconds(user.LastLogin ?? 0)),
                     Shadow = true,
                     WebFontSize = 16
                 }

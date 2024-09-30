@@ -37,7 +37,7 @@ public partial class EditorHitObjectContainer : Container
         Add(new Box
         {
             RelativeSizeAxes = Axes.X,
-            Height = 3,
+            Height = 5,
             Anchor = Anchor.BottomCentre,
             Origin = Anchor.BottomCentre,
             Y = -HITPOSITION
@@ -55,51 +55,12 @@ public partial class EditorHitObjectContainer : Container
         if (hitObject != null) Remove(hitObject, true);
     }
 
-    public Vector2 ScreenSpacePositionAtTime(float time, int lane) => ToScreenSpace(new Vector2(PositionFromLane(lane), PositionAtTime(time)));
-    public float PositionAtTime(float time) => DrawHeight - HITPOSITION - .5f * ((time - (float)clock.CurrentTime) * settings.Zoom);
+    public Vector2 ScreenSpacePositionAtTime(double time, int lane) => ToScreenSpace(new Vector2(PositionFromLane(lane), PositionAtTime(time)));
+    public float PositionAtTime(double time) => (float)(DrawHeight - HITPOSITION - .5f * ((time - clock.CurrentTime) * settings.Zoom));
     public float PositionFromLane(int lane) => (lane - 1) * NOTEWIDTH;
 
-    public float TimeAtScreenSpacePosition(Vector2 screenSpacePosition) => TimeAtPosition(ToLocalSpace(screenSpacePosition).Y);
+    public double TimeAtScreenSpacePosition(Vector2 screenSpacePosition) => TimeAtPosition(ToLocalSpace(screenSpacePosition).Y);
     public int LaneAtScreenSpacePosition(Vector2 position) => LaneAtPosition(ToLocalSpace(position).X);
-    public float TimeAtPosition(float y) => (DrawHeight - HITPOSITION - y) * 2 / settings.Zoom + (float)clock.CurrentTime;
+    public double TimeAtPosition(float y) => (DrawHeight - HITPOSITION - y) * 2 / settings.Zoom + clock.CurrentTime;
     public int LaneAtPosition(float x) => (int)((x + NOTEWIDTH) / NOTEWIDTH);
-
-    public float SnapTime(float time)
-    {
-        var tp = map.MapInfo.GetTimingPoint(time);
-        float t = tp.Time;
-        float increase = tp.Signature * tp.MsPerBeat / (4 * settings.SnapDivisor);
-        if (increase == 0) return time; // no snapping, the game will just freeze because it loops infinitely
-
-        if (time < t)
-        {
-            while (true)
-            {
-                float next = t - increase;
-
-                if (next < time)
-                {
-                    t = next;
-                    break;
-                }
-
-                t = next;
-            }
-        }
-        else
-        {
-            while (true)
-            {
-                float next = t + increase;
-                if (next > time) break;
-
-                t = next;
-            }
-        }
-
-        if (t < 0) t = 0;
-        if (t > clock.TrackLength) t = clock.TrackLength;
-
-        return t;
-    }
 }

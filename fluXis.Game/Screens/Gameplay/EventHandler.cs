@@ -1,13 +1,24 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using fluXis.Game.Map.Structures;
-using osu.Framework.Graphics;
+using fluXis.Game.Map.Structures.Bases;
+using fluXis.Game.Screens.Gameplay.Ruleset;
+using fluXis.Game.Screens.Gameplay.Ruleset.HitObjects;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics.Containers;
 
 namespace fluXis.Game.Screens.Gameplay;
 
-public partial class EventHandler<T> : Component where T : ITimedObject
+public partial class EventHandler<T> : CompositeComponent where T : ITimedObject
 {
+    [Resolved]
+    private Playfield playfield { get; set; }
+
+    [CanBeNull]
+    [Resolved(CanBeNull = true)]
+    private HitObjectManager manager { get; set; }
+
     private List<T> objects { get; }
     private List<T> previous { get; } = new();
 
@@ -26,10 +37,28 @@ public partial class EventHandler<T> : Component where T : ITimedObject
         while (objects.Count > 0 && objects.First().Time <= Clock.CurrentTime)
         {
             var first = objects.First();
-            Trigger?.Invoke(first);
+            trigger(first);
 
             objects.Remove(first);
             previous.Add(first);
+        }
+    }
+
+    private void trigger(T obj)
+    {
+        switch (obj)
+        {
+            case IApplicableToPlayfield pf:
+                pf.Apply(playfield);
+                return;
+
+            case IApplicableToHitManager hm when manager is not null:
+                hm.Apply(manager);
+                return;
+
+            default:
+                Trigger?.Invoke(obj);
+                break;
         }
     }
 }

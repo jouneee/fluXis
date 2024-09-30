@@ -1,9 +1,9 @@
+using System;
 using System.Linq;
 using fluXis.Game.Configuration;
 using fluXis.Game.Database.Maps;
-using fluXis.Game.Graphics.Background;
 using fluXis.Game.Map;
-using fluXis.Game.Map.Events;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Screens.Gameplay.Ruleset.HitObjects;
 using fluXis.Game.Screens.Gameplay.Ruleset.TimingLines;
 using fluXis.Game.Skinning;
@@ -22,10 +22,22 @@ public partial class Playfield : Container
     private SkinManager skinManager { get; set; }
 
     [Resolved]
-    private GlobalBackground backgrounds { get; set; }
+    private GameplayScreen screen { get; set; }
 
     [Resolved]
-    private GameplayScreen screen { get; set; }
+    private LaneSwitchManager laneSwitchManager { get; set; }
+
+    private bool canSeek { get; }
+    public override bool RemoveCompletedTransforms => !canSeek;
+
+    public float RelativePosition
+    {
+        get
+        {
+            var screenWidth = screen.DrawWidth;
+            return (X + screenWidth / 2) / screenWidth;
+        }
+    }
 
     public FillFlowContainer<Receptor> Receptors { get; private set; }
     public HitObjectManager Manager { get; private set; }
@@ -38,14 +50,21 @@ public partial class Playfield : Container
 
     private TimingLineManager timingLineManager;
 
+    private Drawable hitline;
     private Drawable topCover;
     private Drawable bottomCover;
 
     private Bindable<float> topCoverHeight;
     private Bindable<float> bottomCoverHeight;
     private Bindable<ScrollDirection> scrollDirection;
+    private Bindable<double> hitsoundPanStrength;
 
     public bool IsUpScroll => scrollDirection.Value == ScrollDirection.Up;
+
+    public Playfield(bool canSeek)
+    {
+        this.canSeek = canSeek;
+    }
 
     [BackgroundDependencyLoader]
     private void load(FluXisConfig config)
@@ -59,8 +78,13 @@ public partial class Playfield : Container
         topCoverHeight = config.GetBindable<float>(FluXisSetting.LaneCoverTop);
         bottomCoverHeight = config.GetBindable<float>(FluXisSetting.LaneCoverBottom);
         scrollDirection = config.GetBindable<ScrollDirection>(FluXisSetting.ScrollDirection);
+        hitsoundPanStrength = config.GetBindable<double>(FluXisSetting.HitsoundPanning);
 
-        dependencies.CacheAs(Manager = new HitObjectManager { Masking = true });
+        dependencies.CacheAs(Manager = new HitObjectManager
+        {
+            AlwaysPresent = true,
+            Masking = true
+        });
 
         InternalChildren = new[]
         {
@@ -76,10 +100,10 @@ public partial class Playfield : Container
                 Direction = FillDirection.Horizontal,
                 ChildrenEnumerable = Enumerable.Range(0, RealmMap.KeyCount).Select(i => new Receptor(i))
             },
-            skinManager.GetHitLine().With(d =>
+            hitline = skinManager.GetHitLine().With(d =>
             {
+                d.Width = 1;
                 d.RelativeSizeAxes = Axes.X;
-                d.Y = -skinManager.SkinJson.GetKeymode(RealmMap.KeyCount).HitPosition;
             }),
             new Container
             {
@@ -93,25 +117,31 @@ public partial class Playfield : Container
                     bottomCover = skinManager.GetLaneCover(true)
                 }
             },
-            new EventHandler<PlayfieldMoveEvent>(screen.MapEvents.PlayfieldMoveEvents, move =>
-            {
-                this.MoveToX(move.OffsetX, move.Duration, move.Easing);
-                this.MoveToY(move.OffsetY, move.Duration, move.Easing);
-            }),
-            new EventHandler<PlayfieldScaleEvent>(screen.MapEvents.PlayfieldScaleEvents, scale =>
-            {
-                var yScale = scale.ScaleY;
-                if (IsUpScroll) yScale *= -1;
-
-                this.ScaleTo(new Vector2(scale.ScaleX, yScale), scale.Duration, scale.Easing);
-            }),
-            new EventHandler<ShakeEvent>(screen.MapEvents.ShakeEvents, shake =>
-            {
-                screen.Shake(shake.Duration, shake.Magnitude);
-                backgrounds.Shake(shake.Duration, shake.Magnitude);
-            }),
-            new EventHandler<PlayfieldFadeEvent>(screen.MapEvents.PlayfieldFadeEvents, fade => this.FadeTo(fade.Alpha, fade.Duration))
+            new EventHandler<ShakeEvent>(screen.MapEvents.ShakeEvents, shake => screen.Shake(shake.Duration, shake.Magnitude)),
+            new EventHandler<HitObjectFadeEvent>(screen.MapEvents.HitObjectFadeEvents, fade => Manager.FadeTo(fade.Alpha, fade.Duration, fade.Easing))
         };
+
+        if (canSeek)
+        {
+            screen.MapEvents.PlayfieldMoveEvents.ForEach(e => e.Apply(this));
+            screen.MapEvents.PlayfieldScaleEvents.ForEach(e => e.Apply(this));
+            screen.MapEvents.PlayfieldFadeEvents.ForEach(e => e.Apply(this));
+            screen.MapEvents.PlayfieldRotateEvents.ForEach(e => e.Apply(this));
+            screen.MapEvents.ScrollMultiplyEvents.ForEach(e => e.Apply(Manager));
+            screen.MapEvents.TimeOffsetEvents.ForEach(e => e.Apply(Manager));
+        }
+        else
+        {
+            AddRangeInternal(new Drawable[]
+            {
+                new EventHandler<PlayfieldMoveEvent>(screen.MapEvents.PlayfieldMoveEvents),
+                new EventHandler<PlayfieldScaleEvent>(screen.MapEvents.PlayfieldScaleEvents),
+                new EventHandler<PlayfieldFadeEvent>(screen.MapEvents.PlayfieldFadeEvents),
+                new EventHandler<PlayfieldRotateEvent>(screen.MapEvents.PlayfieldRotateEvents),
+                new EventHandler<ScrollMultiplierEvent>(screen.MapEvents.ScrollMultiplyEvents),
+                new EventHandler<TimeOffsetEvent>(screen.MapEvents.TimeOffsetEvents),
+            });
+        }
     }
 
     protected override void LoadComplete()
@@ -128,9 +158,14 @@ public partial class Playfield : Container
 
     protected override void Update()
     {
+        hitline.Y = -laneSwitchManager.HitPosition;
+
         topCover.Y = (topCoverHeight.Value - 1f) / 2f;
         bottomCover.Y = (1f - bottomCoverHeight.Value) / 2f;
+
+        screen.Hitsounding.PlayfieldPanning.Value = Math.Clamp(RelativePosition * 2 - 1, -1, 1) * hitsoundPanStrength.Value;
     }
 
-    protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent) => dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+    protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+        => dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
 }

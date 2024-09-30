@@ -3,6 +3,7 @@ using fluXis.Game.Audio;
 using fluXis.Game.Graphics.Containers;
 using fluXis.Game.Input;
 using osu.Framework.Allocation;
+using osu.Framework.Audio;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Cursor;
@@ -19,22 +20,30 @@ public partial class PanelContainer : CompositeDrawable, IKeyBindingHandler<FluX
 
     public Drawable Content
     {
-        get => contentContainer.Count == 0 ? null : contentContainer[0];
+        get
+        {
+            if (contentContainer is null)
+                return null;
+
+            return contentContainer.Count == 0 ? null : contentContainer[0];
+        }
         set
         {
+            if (contentContainer is null)
+                return;
+
             contentContainer.Clear();
             if (value != null) contentContainer.Add(value);
         }
     }
 
-    [Resolved]
-    private GlobalClock clock { get; set; }
-
     private Drawable dim;
     private Container contentContainer;
 
+    private AudioFilter lowPass;
+
     [BackgroundDependencyLoader]
-    private void load()
+    private void load(AudioManager audio)
     {
         RelativeSizeAxes = Axes.Both;
 
@@ -43,6 +52,7 @@ public partial class PanelContainer : CompositeDrawable, IKeyBindingHandler<FluX
             RelativeSizeAxes = Axes.Both,
             Children = new[]
             {
+                lowPass = new AudioFilter(audio.TrackMixer),
                 dim = new FullInputBlockingContainer
                 {
                     RelativeSizeAxes = Axes.Both,
@@ -72,13 +82,13 @@ public partial class PanelContainer : CompositeDrawable, IKeyBindingHandler<FluX
             Schedule(() => contentContainer.Remove(Content, false));
             dim.Alpha = 0;
             setBlur(0);
-            setCutOff(LowPassFilter.MAX);
+            setCutOff(AudioFilter.MAX);
         }
         else if (Content is { IsLoaded: true })
         {
             dim.Alpha = Content.Alpha;
             setBlur(Content.Alpha);
-            setCutOff((int)(LowPassFilter.MAX - (LowPassFilter.MAX - LowPassFilter.MIN) * Content.Alpha));
+            setCutOff((int)(AudioFilter.MAX - (AudioFilter.MAX - AudioFilter.MIN) * Content.Alpha));
         }
         else if (BlurContainer?.BlurSigma != Vector2.Zero || dim.Alpha != 0)
         {
@@ -103,10 +113,10 @@ public partial class PanelContainer : CompositeDrawable, IKeyBindingHandler<FluX
 
     private void setCutOff(int cutoff)
     {
-        if (clock?.LowPassFilter == null)
+        if (lowPass == null)
             return;
 
-        clock.LowPassFilter.Cutoff = cutoff;
+        lowPass.Cutoff = cutoff;
     }
 
     public bool OnPressed(KeyBindingPressEvent<FluXisGlobalKeybind> e)

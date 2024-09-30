@@ -1,5 +1,7 @@
 using System;
+using fluXis.Game.Graphics.Containers;
 using fluXis.Game.Graphics.Sprites;
+using fluXis.Game.Graphics.UserInterface.Buttons;
 using fluXis.Game.Online.API.Requests.Users;
 using fluXis.Game.Online.Drawables;
 using fluXis.Game.Online.Fluxel;
@@ -19,7 +21,7 @@ public partial class DashboardOnlineTab : DashboardWipTab
     public override DashboardTabType Type => DashboardTabType.Online;
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient fluxel { get; set; }
 
     private bool visible;
     private FillFlowContainer flow;
@@ -27,46 +29,68 @@ public partial class DashboardOnlineTab : DashboardWipTab
     [BackgroundDependencyLoader]
     private void load()
     {
-        Child = flow = new FillFlowContainer
+        Header.Child = new FluXisButton
+        {
+            Text = "Refresh",
+            FontSize = 20,
+            Size = new Vector2(144, 36),
+            Anchor = Anchor.CentreRight,
+            Origin = Anchor.CentreRight,
+            Margin = new MarginPadding { Right = 20 },
+            Color = Colour4.Transparent,
+            Action = refresh
+        };
+
+        Content.Child = new FluXisScrollContainer
         {
             RelativeSizeAxes = Axes.Both,
-            Direction = FillDirection.Full,
-            Spacing = new Vector2(20)
+            Child = flow = new FillFlowContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Full,
+                Spacing = new Vector2(12)
+            }
         };
     }
 
-    public override void Enter()
+    private void refresh()
     {
-        visible = true;
         flow.Clear();
 
         try
         {
             var req = new OnlineUsersRequest();
-            req.Perform(fluxel);
+            fluxel.PerformRequest(req);
 
-            if (req.Response.Status == 200)
+            if (req.IsSuccessful)
             {
-                foreach (var user in req.Response.Data.Users)
+                Schedule(() =>
                 {
-                    Schedule(() =>
-                    {
-                        if (!visible)
-                            return;
+                    if (!visible)
+                        return;
 
+                    foreach (var user in req.Response.Data.Users)
+                    {
                         flow.Add(new DrawableUserCard(user)
                         {
                             Anchor = Anchor.TopCentre,
                             Origin = Anchor.TopCentre
                         });
-                    });
-                }
+                    }
+                });
             }
         }
         catch (Exception e)
         {
             Logger.Error(e, "Failed to get online users");
         }
+    }
+
+    public override void Enter()
+    {
+        visible = true;
+        refresh();
     }
 
     public override void Exit()

@@ -25,10 +25,13 @@ public partial class ModSelector : Container
     private FluXisSpriteText maxScoreText;
     private float scoreMultiplier = 1;
 
+    public float ScoreMultiplier { get; private set; } = 1;
+
     private readonly Dictionary<IMod, ModEntry> mappings = new();
 
     public BindableList<IMod> SelectedMods { get; } = new();
     public ModSelectRate RateMod { get; private set; }
+    public Action<float> RateChanged { get; set; }
 
     private ClickableContainer background;
     private ClickableContainer content;
@@ -41,13 +44,12 @@ public partial class ModSelector : Container
     [BackgroundDependencyLoader]
     private void load(ISampleStore samples)
     {
-        sampleOpen = samples.Get("UI/Select/ModSelect-Open");
-        sampleClose = samples.Get("UI/Select/ModSelect-Close");
-        sampleSelect = samples.Get("UI/Select/ModSelect-Select");
-        sampleDeselect = samples.Get("UI/Select/ModSelect-Deselect");
+        sampleOpen = samples.Get("UI/Select/mods-open");
+        sampleClose = samples.Get("UI/Select/mods-close");
+        sampleSelect = samples.Get("UI/Select/mods-select");
+        sampleDeselect = samples.Get("UI/Select/mods-deselect");
 
         RelativeSizeAxes = Axes.Both;
-        Padding = new MarginPadding { Top = -10 };
         Alpha = 0;
 
         InternalChildren = new Drawable[]
@@ -189,7 +191,8 @@ public partial class ModSelector : Container
                                                                         Mods = new IMod[]
                                                                         {
                                                                             new NoSvMod(),
-                                                                            new NoLnMod()
+                                                                            new NoLnMod(),
+                                                                            new MirrorMod()
                                                                         }
                                                                     }
                                                                 }
@@ -248,7 +251,7 @@ public partial class ModSelector : Container
     {
         base.LoadComplete();
 
-        SelectedMods.BindCollectionChanged((_, __) => UpdateTotalMultiplier(), true);
+        SelectedMods.BindCollectionChanged((_, _) => UpdateTotalMultiplier(), true);
     }
 
     public void AddMapping(IMod mod, ModEntry entry)
@@ -284,7 +287,20 @@ public partial class ModSelector : Container
         SelectedMods.Remove(mod);
     }
 
-    public void UpdateTotalMultiplier() => this.TransformTo(nameof(scoreMultiplier), 1f + SelectedMods.Sum(mod => mod.ScoreMultiplier - 1f), 400, Easing.OutQuint);
+    public void DeselectAll()
+    {
+        sampleDeselect?.Play();
+        SelectedMods.Clear();
+        RateMod.RateBindable.Value = 1f;
+    }
+
+    public void UpdateTotalMultiplier()
+    {
+        var multiplier = 1f + SelectedMods.Sum(mod => mod.ScoreMultiplier - 1f);
+
+        ScoreMultiplier = multiplier;
+        this.TransformTo(nameof(scoreMultiplier), multiplier, 400, Easing.OutQuint);
+    }
 
     private void updateVisibility()
     {

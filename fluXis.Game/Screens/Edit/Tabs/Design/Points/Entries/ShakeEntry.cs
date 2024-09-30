@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using fluXis.Game.Graphics.Sprites;
-using fluXis.Game.Map.Events;
-using fluXis.Game.Map.Structures;
+using fluXis.Game.Graphics.UserInterface.Color;
+using fluXis.Game.Map.Structures.Bases;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.List;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings.Preset;
@@ -14,7 +15,7 @@ namespace fluXis.Game.Screens.Edit.Tabs.Design.Points.Entries;
 public partial class ShakeEntry : PointListEntry
 {
     protected override string Text => "Shake";
-    protected override Colour4 Color => Colour4.FromHex("#01FEFE");
+    protected override Colour4 Color => FluXisColors.Shake;
 
     private ShakeEvent shake => Object as ShakeEvent;
 
@@ -23,7 +24,7 @@ public partial class ShakeEntry : PointListEntry
     {
     }
 
-    protected override ITimedObject CreateClone() => new ShakeEvent
+    public override ITimedObject CreateClone() => new ShakeEvent
     {
         Time = Object.Time,
         Magnitude = shake.Magnitude,

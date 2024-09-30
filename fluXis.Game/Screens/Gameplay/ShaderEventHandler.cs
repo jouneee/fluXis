@@ -1,110 +1,73 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using fluXis.Game.Graphics.Shaders;
-using fluXis.Game.Graphics.Shaders.Bloom;
-using fluXis.Game.Graphics.Shaders.Chromatic;
-using fluXis.Game.Graphics.Shaders.Greyscale;
-using fluXis.Game.Graphics.Shaders.Invert;
-using fluXis.Game.Graphics.Shaders.Mosaic;
-using fluXis.Game.Map.Events;
-using fluXis.Game.Map.Events.Shader;
+using fluXis.Game.Map.Structures.Events;
+using osu.Framework.Allocation;
 using osu.Framework.Graphics;
-using osu.Framework.Logging;
 
 namespace fluXis.Game.Screens.Gameplay;
 
 public partial class ShaderEventHandler : EventHandler<ShaderEvent>
 {
     private ShaderStackContainer stack { get; }
+    private ShaderType[] types { get; }
 
     public ShaderEventHandler(List<ShaderEvent> events, ShaderStackContainer stack)
         : base(events)
     {
+        types = events.Select(x => x.Type).Distinct().ToArray();
         this.stack = stack;
         Trigger = trigger;
     }
 
-    private void trigger(ShaderEvent ev)
+    [BackgroundDependencyLoader]
+    private void load()
     {
-        switch (ev.ShaderName)
+        foreach (var shaderType in types)
         {
-            case "Invert":
-                invert(ev);
-                break;
+            var shader = stack.GetShader(shaderType);
 
-            case "Greyscale":
-                greyscale(ev);
-                break;
+            if (shader is null)
+                throw new Exception($"Shader with type {shaderType} is not in stack!");
 
-            case "Chromatic":
-                chromatic(ev);
-                break;
-
-            case "Bloom":
-                bloom(ev);
-                break;
-
-            case "Mosaic":
-                mosaic(ev);
-                break;
+            AddInternal(new TransformHandler(shader));
         }
     }
 
-    private void invert(ShaderEvent ev)
+    private void trigger(ShaderEvent ev)
     {
-        var data = ev.ParamsAs<ShaderStrengthParams>();
-        var invert = stack.GetShader<InvertContainer>();
+        var handler = InternalChildren.OfType<TransformHandler>().FirstOrDefault(x => x.Type == ev.Type);
 
-        if (invert == null)
-            throw new System.Exception("Invert shader not found");
+        if (handler is null)
+            throw new Exception($"Handler with type {ev.ShaderName} is not in scene tree!");
 
-        invert.TransformTo(nameof(invert.Strength), data.Strength, ev.Duration);
+        if (ev.UseStartParams)
+            handler.StrengthTo(ev.StartParameters.Strength);
+
+        handler.StrengthTo(ev.EndParameters.Strength, ev.Duration, ev.Easing);
     }
 
-    private void greyscale(ShaderEvent ev)
+    // the shader stack is outside the gameplay clock.
+    // we use this to keep up with rate changes and seeking
+    private partial class TransformHandler : Drawable
     {
-        Logger.Log($"Greyscale at {Clock.CurrentTime}", LoggingTarget.Runtime, LogLevel.Debug);
-        var data = ev.ParamsAs<ShaderStrengthParams>();
-        var greyscale = stack.GetShader<GreyscaleContainer>();
+        private ShaderContainer container { get; }
+        public ShaderType Type { get; }
 
-        if (greyscale == null)
-            throw new System.Exception("Greyscale shader not found");
+        private float strength
+        {
+            get => container.Strength;
+            set => container.Strength = value;
+        }
 
-        greyscale.TransformTo(nameof(greyscale.Strength), data.Strength, ev.Duration);
-    }
+        public TransformHandler(ShaderContainer container)
+        {
+            this.container = container;
+            Type = container.Type;
+        }
 
-    private void chromatic(ShaderEvent ev)
-    {
-        Logger.Log($"Greyscale at {Clock.CurrentTime}", LoggingTarget.Runtime, LogLevel.Debug);
-        var data = ev.ParamsAs<ShaderStrengthParams>();
-        var chromatic = stack.GetShader<ChromaticContainer>();
-
-        if (chromatic == null)
-            throw new System.Exception("Chromatic shader not found");
-
-        chromatic.TransformTo(nameof(chromatic.Strength), data.Strength, ev.Duration);
-    }
-
-    private void bloom(ShaderEvent ev)
-    {
-        Logger.Log($"Bloom at {Clock.CurrentTime}", LoggingTarget.Runtime, LogLevel.Debug);
-        var data = ev.ParamsAs<ShaderStrengthParams>();
-        var bloom = stack.GetShader<BloomContainer>();
-
-        if (bloom == null)
-            throw new System.Exception("Bloom shader not found");
-
-        bloom.TransformTo(nameof(bloom.Strength), data.Strength, ev.Duration);
-    }
-
-    private void mosaic(ShaderEvent ev)
-    {
-        Logger.Log($"Mosaic at {Clock.CurrentTime}", LoggingTarget.Runtime, LogLevel.Debug);
-        var data = ev.ParamsAs<ShaderStrengthParams>();
-        var mosaic = stack.GetShader<MosaicContainer>();
-
-        if (mosaic == null)
-            throw new System.Exception("Mosaic shader not found");
-
-        mosaic.TransformTo(nameof(mosaic.Strength), data.Strength, ev.Duration);
+        public void StrengthTo(float str, double dur = 0, Easing ease = Easing.None)
+            => this.TransformTo(nameof(strength), str, dur, ease);
     }
 }

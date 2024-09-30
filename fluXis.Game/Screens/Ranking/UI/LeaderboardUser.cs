@@ -3,10 +3,10 @@ using fluXis.Game.Graphics;
 using fluXis.Game.Graphics.Drawables;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Color;
-using fluXis.Game.Online.API.Models.Users;
 using fluXis.Game.Online.Drawables;
 using fluXis.Game.Overlay.User;
 using fluXis.Game.Utils;
+using fluXis.Shared.Components.Users;
 using osu.Framework.Allocation;
 using osu.Framework.Extensions;
 using osu.Framework.Graphics;
@@ -38,6 +38,9 @@ public partial class LeaderboardUser : Container
         CornerRadius = 20;
         Masking = true;
         EdgeEffect = FluXisStyles.ShadowSmall;
+
+        if (user.Statistics == null)
+            return;
 
         InternalChildren = new Drawable[]
         {
@@ -78,17 +81,11 @@ public partial class LeaderboardUser : Container
                         Origin = Anchor.CentreLeft,
                         Child = new FluXisSpriteText
                         {
-                            Text = $"#{user.GlobalRank}",
+                            Text = $"#{user.Statistics.GlobalRank}",
                             Anchor = Anchor.Centre,
                             Origin = Anchor.Centre,
                             Shadow = true,
-                            FontSize = user.GlobalRank switch
-                            {
-                                < 100 => 36,
-                                < 1000 => 30,
-                                < 10000 => 24,
-                                _ => 20
-                            }
+                            FontSize = 36
                         }
                     },
                     new Container
@@ -134,7 +131,7 @@ public partial class LeaderboardUser : Container
                                         Anchor = Anchor.CentreLeft,
                                         Origin = Anchor.CentreLeft,
                                         Shadow = true,
-                                        FontSize = 24
+                                        WebFontSize = 20
                                     }
                                 }
                             }
@@ -153,7 +150,7 @@ public partial class LeaderboardUser : Container
                 {
                     new FluXisSpriteText
                     {
-                        Text = $"{user.OverallRating.ToStringInvariant("0.00")} OVR",
+                        Text = $"{user.Statistics.OverallRating.ToStringInvariant("0.00")} OVR",
                         FontSize = 36,
                         Anchor = Anchor.TopRight,
                         Origin = Anchor.TopRight,
@@ -171,12 +168,12 @@ public partial class LeaderboardUser : Container
                         {
                             new FluXisSpriteText
                             {
-                                Text = $"{user.PotentialRating.ToStringInvariant("0.00")} PR",
+                                Text = $"{user.Statistics.PotentialRating.ToStringInvariant("0.00")} PR",
                                 Shadow = true
                             },
                             new FluXisSpriteText
                             {
-                                Text = $"{user.OverallAccuracy.ToStringInvariant("00.00")}%",
+                                Text = $"{user.Statistics.OverallAccuracy.ToStringInvariant("00.00")}%",
                                 Shadow = true
                             }
                         }
@@ -223,19 +220,32 @@ public partial class LeaderboardUser : Container
             color = Colour4.TryParseHex(group.Color, out var c) ? c : color;
         }
 
+        if (user.Club is { ID: > 0 })
+        {
+            flow.Add(new ClubTag(user.Club)
+            {
+                WebFontSize = 24,
+                Anchor = Anchor.CentreLeft,
+                Origin = Anchor.CentreLeft,
+                Shadow = true
+            });
+        }
+
         if (string.IsNullOrEmpty(user.DisplayName) || user.DisplayName == user.Username)
         {
-            flow.Child = new FluXisSpriteText
+            flow.Add(new FluXisSpriteText
             {
                 Text = user.Username,
+                Anchor = Anchor.CentreLeft,
+                Origin = Anchor.CentreLeft,
                 Colour = color,
-                FontSize = 36,
+                WebFontSize = 32,
                 Shadow = true
-            };
+            });
         }
         else
         {
-            flow.Children = new Drawable[]
+            flow.AddRange(new Drawable[]
             {
                 new FluXisSpriteText
                 {
@@ -243,7 +253,7 @@ public partial class LeaderboardUser : Container
                     Colour = color,
                     Anchor = Anchor.CentreLeft,
                     Origin = Anchor.CentreLeft,
-                    FontSize = 36,
+                    WebFontSize = 32,
                     Shadow = true
                 },
                 new FluXisSpriteText
@@ -251,11 +261,11 @@ public partial class LeaderboardUser : Container
                     Text = user.Username,
                     Anchor = Anchor.CentreLeft,
                     Origin = Anchor.CentreLeft,
-                    FontSize = 24,
+                    WebFontSize = 20,
                     Alpha = .8f,
                     Shadow = true
                 }
-            };
+            });
         }
 
         return flow;

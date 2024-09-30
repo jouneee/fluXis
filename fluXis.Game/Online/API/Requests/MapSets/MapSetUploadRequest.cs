@@ -1,27 +1,29 @@
 using System.Net.Http;
-using fluXis.Game.Database.Maps;
-using fluXis.Game.Online.API.Models.Maps;
+using fluXis.Shared.Components.Maps;
+using osu.Framework.IO.Network;
 
 namespace fluXis.Game.Online.API.Requests.MapSets;
 
 public class MapSetUploadRequest : APIRequest<APIMapSet>
 {
-    protected override string Path => update ? $"/mapset/{map.OnlineID}" : "/mapsets";
+    protected override string Path => update ? $"/mapset/{mapID}" : "/mapsets";
     protected override HttpMethod Method => update ? HttpMethod.Patch : HttpMethod.Post;
 
-    private bool update => map.OnlineID != -1;
+    private bool update => mapID != -1;
 
     private byte[] file { get; }
-    private RealmMapSet map { get; }
+    private long mapID { get; }
 
-    public MapSetUploadRequest(byte[] file, RealmMapSet map)
+    public MapSetUploadRequest(byte[] file, long mapID)
     {
         this.file = file;
-        this.map = map;
+        this.mapID = mapID;
     }
 
-    protected override void CreatePostData(FluXisJsonWebRequest<APIMapSet> request)
+    protected override WebRequest CreateWebRequest(string url)
     {
-        request.AddFile("file", file);
+        var req = base.CreateWebRequest(url);
+        req.AddFile("file", file);
+        return req;
     }
 }

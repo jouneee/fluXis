@@ -5,9 +5,9 @@ using fluXis.Game.Storyboards;
 using fluXis.Game.Utils;
 using Newtonsoft.Json.Linq;
 using osu.Framework.Extensions;
+using osu.Framework.Extensions.IEnumerableExtensions;
 using osu.Framework.Graphics;
 using osu.Framework.Logging;
-using osu.Framework.Utils;
 using osuTK;
 
 namespace fluXis.Import.osu.Storyboards;
@@ -20,6 +20,7 @@ public class OsuStoryboardParser
 
     private Storyboard storyboard;
     private StoryboardElement currentElement;
+    private OsuStoryboardLoop currentLoop;
 
     public Storyboard Parse(string data)
     {
@@ -53,11 +54,44 @@ public class OsuStoryboardParser
 
         foreach (var element in storyboard.Elements)
         {
-            var firstFade = element.Animations.FirstOrDefault(a => a.Type == StoryboardAnimationType.Fade);
-            var firstAnimation = element.Animations.FirstOrDefault();
+            var initialValues = new HashSet<StoryboardAnimationType>();
+            var startTime = double.MaxValue;
+            var endTime = double.MinValue;
 
-            element.StartTime = firstFade?.StartTime ?? firstAnimation?.StartTime ?? 0;
-            element.EndTime = element.Animations.Max(a => a.EndTime);
+            var toAdd = new List<StoryboardAnimation>();
+
+            foreach (var animation in element.Animations)
+            {
+                if (initialValues.Add(animation.Type))
+                {
+                    toAdd.Add(new StoryboardAnimation
+                    {
+                        Type = animation.Type,
+                        ValueStart = animation.ValueStart,
+                        ValueEnd = animation.ValueStart
+                    });
+                }
+
+                startTime = Math.Min(startTime, animation.StartTime);
+                endTime = Math.Max(endTime, animation.EndTime);
+            }
+
+            foreach (var animation in toAdd)
+            {
+                animation.StartTime = startTime - 1; // just to make sure it's actually the initial
+                element.Animations.Add(animation);
+            }
+
+            element.Animations.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
+
+            if (element.Animations.Count <= 0)
+            {
+                Logger.Log($"Element {element.Type} ({element.Parameters["file"]}) does not have any animations!");
+                continue;
+            }
+
+            element.StartTime = startTime;
+            element.EndTime = endTime;
         }
 
         storyboard.Elements.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
@@ -76,12 +110,18 @@ public class OsuStoryboardParser
                 break;
         }
 
-        line = line.Substring(depth);
+        line = line[depth..];
 
         var split = line.Split(',');
 
         if (depth == 0)
         {
+            if (currentLoop is not null)
+            {
+                currentLoop.PushTo(currentElement.Animations);
+                currentLoop = null;
+            }
+
             currentElement = null;
 
             switch (split[0])
@@ -122,8 +162,27 @@ public class OsuStoryboardParser
         {
             var commandType = split[0];
 
+            if (depth == 1 && currentLoop is not null)
+            {
+                currentLoop.PushTo(currentElement.Animations);
+                currentLoop = null;
+            }
+
             switch (commandType)
             {
+                case "L":
+                {
+                    var startTime = split[1].ToDoubleInvariant();
+                    var count = split[2].ToIntInvariant();
+
+                    currentLoop = new OsuStoryboardLoop
+                    {
+                        StartTime = startTime,
+                        LoopCount = count
+                    };
+                    break;
+                }
+
                 default:
                 {
                     if (string.IsNullOrEmpty(split[3]))
@@ -134,6 +193,8 @@ public class OsuStoryboardParser
                     var endTime = split[3].ToDoubleInvariant();
                     var duration = endTime - startTime;
 
+                    StoryboardAnimation[] buffer = null;
+
                     switch (commandType)
                     {
                         case "F": // fade
@@ -141,15 +202,18 @@ public class OsuStoryboardParser
                             var start = split[4].ToFloatInvariant();
                             var end = split.Length > 5 ? split[5].ToFloatInvariant() : start;
 
-                            currentElement.Animations.Add(new StoryboardAnimation
+                            buffer = new[]
                             {
-                                Type = StoryboardAnimationType.Fade,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = start.ToStringInvariant(),
-                                ValueEnd = end.ToStringInvariant()
-                            });
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.Fade,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = start.ToStringInvariant(),
+                                    ValueEnd = end.ToStringInvariant()
+                                }
+                            };
 
                             break;
                         }
@@ -159,15 +223,18 @@ public class OsuStoryboardParser
                             var start = split[4].ToFloatInvariant();
                             var end = split.Length > 5 ? split[5].ToFloatInvariant() : start;
 
-                            currentElement.Animations.Add(new StoryboardAnimation
+                            buffer = new[]
                             {
-                                Type = StoryboardAnimationType.Scale,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = start.ToStringInvariant(),
-                                ValueEnd = end.ToStringInvariant()
-                            });
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.Scale,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = start.ToStringInvariant(),
+                                    ValueEnd = end.ToStringInvariant()
+                                }
+                            };
 
                             break;
                         }
@@ -179,15 +246,18 @@ public class OsuStoryboardParser
                             var endX = split.Length > 6 ? split[6].ToFloatInvariant() : startX;
                             var endY = split.Length > 7 ? split[7].ToFloatInvariant() : startY;
 
-                            currentElement.Animations.Add(new StoryboardAnimation
+                            buffer = new[]
                             {
-                                Type = StoryboardAnimationType.ScaleVector,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = $"{startX},{startY}",
-                                ValueEnd = $"{endX},{endY}"
-                            });
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.ScaleVector,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = $"{startX},{startY}",
+                                    ValueEnd = $"{endX},{endY}"
+                                }
+                            };
 
                             break;
                         }
@@ -197,18 +267,21 @@ public class OsuStoryboardParser
                             var start = split[4].ToFloatInvariant();
                             var end = split.Length > 5 ? split[5].ToFloatInvariant() : start;
 
-                            var startDeg = MathUtils.RadiansToDegrees(start);
-                            var endDeg = MathUtils.RadiansToDegrees(end);
+                            var startDeg = float.RadiansToDegrees(start);
+                            var endDeg = float.RadiansToDegrees(end);
 
-                            currentElement.Animations.Add(new StoryboardAnimation
+                            buffer = new[]
                             {
-                                Type = StoryboardAnimationType.Rotate,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = startDeg.ToStringInvariant(),
-                                ValueEnd = endDeg.ToStringInvariant()
-                            });
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.Rotate,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = startDeg.ToStringInvariant(),
+                                    ValueEnd = endDeg.ToStringInvariant()
+                                }
+                            };
 
                             break;
                         }
@@ -220,25 +293,27 @@ public class OsuStoryboardParser
                             var endX = split.Length > 6 ? split[6].ToFloatInvariant() + x_adjust : startX;
                             var endY = split.Length > 7 ? split[7].ToFloatInvariant() : startY;
 
-                            currentElement.Animations.Add(new StoryboardAnimation
+                            buffer = new[]
                             {
-                                Type = StoryboardAnimationType.MoveX,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = startX.ToStringInvariant(),
-                                ValueEnd = endX.ToStringInvariant()
-                            });
-
-                            currentElement.Animations.Add(new StoryboardAnimation
-                            {
-                                Type = StoryboardAnimationType.MoveY,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = startY.ToStringInvariant(),
-                                ValueEnd = endY.ToStringInvariant()
-                            });
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.MoveX,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = startX.ToStringInvariant(),
+                                    ValueEnd = endX.ToStringInvariant()
+                                },
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.MoveY,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = startY.ToStringInvariant(),
+                                    ValueEnd = endY.ToStringInvariant()
+                                }
+                            };
 
                             break;
                         }
@@ -248,15 +323,18 @@ public class OsuStoryboardParser
                             var start = split[4].ToFloatInvariant() + x_adjust;
                             var end = split.Length > 5 ? split[5].ToFloatInvariant() + x_adjust : start;
 
-                            currentElement.Animations.Add(new StoryboardAnimation
+                            buffer = new[]
                             {
-                                Type = StoryboardAnimationType.MoveX,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = start.ToStringInvariant(),
-                                ValueEnd = end.ToStringInvariant()
-                            });
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.MoveX,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = start.ToStringInvariant(),
+                                    ValueEnd = end.ToStringInvariant()
+                                }
+                            };
 
                             break;
                         }
@@ -266,15 +344,18 @@ public class OsuStoryboardParser
                             var start = split[4].ToFloatInvariant();
                             var end = split.Length > 5 ? split[5].ToFloatInvariant() : start;
 
-                            currentElement.Animations.Add(new StoryboardAnimation
+                            buffer = new[]
                             {
-                                Type = StoryboardAnimationType.MoveY,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = start.ToStringInvariant(),
-                                ValueEnd = end.ToStringInvariant()
-                            });
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.MoveY,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = start.ToStringInvariant(),
+                                    ValueEnd = end.ToStringInvariant()
+                                }
+                            };
 
                             break;
                         }
@@ -291,18 +372,29 @@ public class OsuStoryboardParser
                             var hexStart = $"#{(int)startRed:X2}{(int)startGreen:X2}{(int)startBlue:X2}";
                             var hexEnd = $"#{(int)endRed:X2}{(int)endGreen:X2}{(int)endBlue:X2}";
 
-                            currentElement.Animations.Add(new StoryboardAnimation
+                            buffer = new[]
                             {
-                                Type = StoryboardAnimationType.Color,
-                                StartTime = startTime,
-                                Duration = duration,
-                                Easing = easing,
-                                ValueStart = hexStart,
-                                ValueEnd = hexEnd
-                            });
+                                new StoryboardAnimation
+                                {
+                                    Type = StoryboardAnimationType.Color,
+                                    StartTime = startTime,
+                                    Duration = duration,
+                                    Easing = easing,
+                                    ValueStart = hexStart,
+                                    ValueEnd = hexEnd
+                                }
+                            };
                             break;
                         }
                     }
+
+                    if (buffer is null || buffer.Length == 0)
+                        break;
+
+                    if (depth == 2 && currentLoop is not null)
+                        buffer.ForEach(currentLoop.Animations.Add);
+                    else if (depth == 1)
+                        buffer.ForEach(currentElement.Animations.Add);
 
                     break;
                 }

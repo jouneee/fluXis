@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using fluXis.Game.Map;
+using fluXis.Game.Utils;
 using JetBrains.Annotations;
 using osu.Framework.Extensions.IEnumerableExtensions;
 using osu.Framework.Graphics.Textures;
@@ -14,9 +15,20 @@ public class RealmMapSet : RealmObject
     [PrimaryKey]
     public Guid ID { get; set; }
 
-    public int OnlineID { get; set; } = -1;
+    public long OnlineID { get; set; } = -1;
     public string Cover { get; set; } = "cover.png";
     public IList<RealmMap> Maps { get; } = null!;
+
+    [Ignored]
+    public List<RealmMap> MapsSorted
+    {
+        get
+        {
+            var maps = Maps.ToList();
+            maps.Sort((a, b) => MapUtils.CompareMap(a, b, MapUtils.SortingMode.Difficulty));
+            return maps;
+        }
+    }
 
     public DateTimeOffset DateAdded { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset? DateSubmitted { get; set; }
@@ -26,7 +38,7 @@ public class RealmMapSet : RealmObject
     public RealmMapMetadata Metadata => Maps.FirstOrDefault()?.Metadata ?? new RealmMapMetadata();
 
     [Ignored]
-    public bool Managed { get; set; }
+    internal bool AutoImported { get; set; }
 
     [Ignored]
     [CanBeNull]

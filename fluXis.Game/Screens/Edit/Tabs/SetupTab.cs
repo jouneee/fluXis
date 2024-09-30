@@ -103,12 +103,6 @@ public partial class SetupTab : EditorTab
                                                             Placeholder = "...",
                                                             OnChange = value => map.MapInfo.Metadata.Difficulty = map.RealmMap.Difficulty = value
                                                         },
-                                                        new SetupTextBox("Source")
-                                                        {
-                                                            Default = map.MapInfo.Metadata.Source,
-                                                            Placeholder = "No Source",
-                                                            OnChange = value => map.MapInfo.Metadata.Source = map.RealmMap.Metadata.Source = value
-                                                        },
                                                         new SetupTextBox("Tags")
                                                         {
                                                             Default = map.MapInfo.Metadata.Tags,
@@ -184,6 +178,30 @@ public partial class SetupTab : EditorTab
                                                         }
                                                     }
                                                 },
+                                                new SetupSection("Sources")
+                                                {
+                                                    Entries = new Drawable[]
+                                                    {
+                                                        new SetupTextBox("Audio")
+                                                        {
+                                                            Default = map.MapInfo.Metadata.AudioSource,
+                                                            Placeholder = "No Source",
+                                                            OnChange = value => map.MapInfo.Metadata.AudioSource = map.RealmMap.Metadata.Source = value
+                                                        },
+                                                        new SetupTextBox("Background")
+                                                        {
+                                                            Default = map.MapInfo.Metadata.BackgroundSource,
+                                                            Placeholder = "No Source",
+                                                            OnChange = value => map.MapInfo.Metadata.BackgroundSource = value
+                                                        },
+                                                        new SetupTextBox("Cover")
+                                                        {
+                                                            Default = map.MapInfo.Metadata.CoverSource,
+                                                            Placeholder = "No Source",
+                                                            OnChange = value => map.MapInfo.Metadata.CoverSource = value
+                                                        },
+                                                    }
+                                                },
                                                 new SetupSection("Keymode")
                                                 {
                                                     Entries = new Drawable[] { new SetupKeymode() }
@@ -197,7 +215,11 @@ public partial class SetupTab : EditorTab
                                                             Default = map.MapInfo.AccuracyDifficulty,
                                                             OnChange = value => map.MapInfo.AccuracyDifficulty = map.RealmMap.AccuracyDifficulty = value
                                                         },
-                                                        // new SetupSlider("Health") { Default = map.MapInfo.HealthDifficulty },
+                                                        new SetupSlider("Health")
+                                                        {
+                                                            Default = map.MapInfo.HealthDifficulty,
+                                                            OnChange = value => map.MapInfo.HealthDifficulty = map.RealmMap.HealthDifficulty = value
+                                                        },
                                                     }
                                                 }
                                             }

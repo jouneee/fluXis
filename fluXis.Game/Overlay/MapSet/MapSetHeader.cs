@@ -3,8 +3,8 @@ using fluXis.Game.Graphics.Containers;
 using fluXis.Game.Graphics.Sprites;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Map.Drawables.Online;
-using fluXis.Game.Online.API.Models.Maps;
 using fluXis.Game.Utils;
+using fluXis.Shared.Components.Maps;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
@@ -27,7 +27,7 @@ public partial class MapSetHeader : CompositeDrawable
     {
         RelativeSizeAxes = Axes.X;
         Height = 280;
-        CornerRadius = 20;
+        CornerRadius = 24;
         Masking = true;
 
         InternalChildren = new Drawable[]
@@ -35,7 +35,7 @@ public partial class MapSetHeader : CompositeDrawable
             new LoadWrapper<DrawableOnlineBackground>
             {
                 RelativeSizeAxes = Axes.Both,
-                LoadContent = () => new DrawableOnlineBackground(set)
+                LoadContent = () => new DrawableOnlineBackground(set, OnlineTextureStore.AssetSize.Large)
                 {
                     RelativeSizeAxes = Axes.Both,
                     FillMode = FillMode.Fill,
@@ -71,7 +71,7 @@ public partial class MapSetHeader : CompositeDrawable
                             CornerRadius = 20,
                             Masking = true,
                             EdgeEffect = FluXisStyles.ShadowMedium,
-                            LoadContent = () => new DrawableOnlineCover(set)
+                            LoadContent = () => new DrawableOnlineCover(set, OnlineTextureStore.AssetSize.Large)
                             {
                                 RelativeSizeAxes = Axes.Both,
                                 FillMode = FillMode.Fill,
@@ -132,7 +132,7 @@ public partial class MapSetHeader : CompositeDrawable
 
     private Drawable getUploadDate()
     {
-        var date = TimeUtils.GetFromSeconds(set.Submitted);
+        var date = TimeUtils.GetFromSeconds(set.DateSubmitted);
 
         return new FillFlowContainer
         {

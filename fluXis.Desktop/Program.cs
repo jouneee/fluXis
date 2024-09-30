@@ -5,12 +5,14 @@ using System.Linq;
 using fluXis.Game;
 using fluXis.Game.IPC;
 using fluXis.Game.Localization;
+using fluXis.Game.Localization.Categories;
 using fluXis.Game.Localization.Categories.Settings;
 using fluXis.Shared.Utils;
 using osu.Framework.Platform;
 using osu.Framework;
 using osu.Framework.Localisation;
 using osu.Framework.Logging;
+using Velopack;
 
 namespace fluXis.Desktop;
 
@@ -20,6 +22,8 @@ public static class Program
 
     public static void Main(string[] args)
     {
+        VelopackApp.Build().Run();
+
         if (args.Contains("--generate-langfiles"))
         {
             generateDefaultLangfiles();
@@ -41,6 +45,18 @@ public static class Program
 
             name += $"-{profile}";
             Console.WriteLine($"Running with profile {profile}");
+        }
+
+        if (Args.Contains("--post-update"))
+        {
+            try
+            {
+                var dir = Path.Combine(AppContext.BaseDirectory, "patches");
+
+                if (Directory.Exists(dir))
+                    Directory.Delete(dir, true);
+            }
+            catch { }
         }
 
         if (OperatingSystem.IsWindows())
@@ -101,7 +117,12 @@ public static class Program
             new SettingsInputStrings(),
             new SettingsMaintenanceStrings(),
             new SettingsPluginsStrings(),
-            new SettingsUIStrings()
+            new SettingsUIStrings(),
+            new GeneralStrings(),
+            new MainMenuStrings(),
+            new ModSelectStrings(),
+            new ModStrings(),
+            new SongSelectStrings()
         };
 
         Directory.CreateDirectory("langfiles");

@@ -7,12 +7,15 @@ using fluXis.Game.Audio;
 using fluXis.Game.Configuration;
 using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Scoring.Processing.Health;
+using fluXis.Game.Screens.Course;
 using fluXis.Game.Skinning.Bases.Judgements;
+using fluXis.Game.Skinning.Custom;
 using fluXis.Game.Skinning.Default;
 using fluXis.Game.Skinning.Json;
 using fluXis.Game.Utils;
 using fluXis.Shared.Scoring.Enums;
 using fluXis.Shared.Utils;
+using Newtonsoft.Json;
 using osu.Framework.Allocation;
 using osu.Framework.Audio;
 using osu.Framework.Audio.Sample;
@@ -55,7 +58,6 @@ public partial class SkinManager : Component, ISkin, IDragDropHandler
     private ISkin currentSkin { get; set; }
 
     private const string default_skin_name = "Default";
-    private const string default_bright_skin_name = "Default Bright";
 
     public Action SkinChanged { get; set; }
     public Action SkinListChanged { get; set; }
@@ -73,8 +75,7 @@ public partial class SkinManager : Component, ISkin, IDragDropHandler
     {
         string[] defaultSkins =
         {
-            default_skin_name,
-            default_bright_skin_name
+            default_skin_name
         };
 
         var custom = skinStorage.GetDirectories("").ToArray();
@@ -129,6 +130,9 @@ public partial class SkinManager : Component, ISkin, IDragDropHandler
 
     public bool OnDragDrop(string file)
     {
+        if (!File.Exists(file))
+            return false;
+
         var zip = new ZipArchive(File.OpenRead(file), ZipArchiveMode.Read);
 
         var folder = Path.GetFileNameWithoutExtension(file);
@@ -165,14 +169,19 @@ public partial class SkinManager : Component, ISkin, IDragDropHandler
         return true;
     }
 
-    public void OpenFolder() => PathUtils.OpenFolder(isDefault(SkinFolder) ? skinStorage.GetFullPath(".") : skinStorage.GetFullPath(SkinFolder));
+    public void OpenFolder()
+    {
+        if (isDefault(SkinFolder))
+            skinStorage.PresentExternally();
+        else
+            skinStorage.PresentFileExternally($"{SkinFolder}/.");
+    }
 
     public void ExportCurrent()
     {
         if (isDefault(SkinFolder)) return;
 
-        var exportPath = host.Storage.GetFullPath("export", true);
-        var zipPath = Path.Combine(exportPath, $"{SkinFolder}.fsk");
+        var zipPath = game.ExportStorage.GetFullPath($"{SkinFolder}.fsk");
 
         if (File.Exists(zipPath))
             File.Delete(zipPath);
@@ -187,7 +196,7 @@ public partial class SkinManager : Component, ISkin, IDragDropHandler
         }
 
         Logger.Log($"Exported skin '{SkinFolder}' to '{zipPath}'", LoggingTarget.Information);
-        PathUtils.ShowFile(zipPath);
+        game.ExportStorage.PresentFileExternally(zipPath);
     }
 
     public void Delete(string folder)
@@ -223,9 +232,6 @@ public partial class SkinManager : Component, ISkin, IDragDropHandler
         {
             case default_skin_name:
                 return defaultSkin;
-
-            case default_bright_skin_name:
-                return new DefaultBrightSkin(textures, samples);
         }
 
         var skinJson = new SkinJson();
@@ -241,19 +247,23 @@ public partial class SkinManager : Component, ISkin, IDragDropHandler
             else
                 Logger.Log($"No skin.json in folder '{folder}' found, using default skin.json", LoggingTarget.Information);
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            Logger.Error(e, $"Failed to load skin.json '{folder}'");
+            if (ex is JsonReaderException)
+                Logger.Log($"Failed to parse skin.json for '{folder}'! {ex.Message}", LoggingTarget.Runtime, LogLevel.Error);
+            else
+                Logger.Error(ex, $"Failed to load skin.json '{folder}'");
         }
 
         return createCustomSkin(skinJson, folder);
     }
 
-    private bool isDefault(string skinName) => string.Equals(skinName, default_skin_name, StringComparison.CurrentCultureIgnoreCase) || string.Equals(skinName, default_bright_skin_name, StringComparison.CurrentCultureIgnoreCase);
+    private bool isDefault(string skinName) => string.Equals(skinName, default_skin_name, StringComparison.CurrentCultureIgnoreCase);
 
     public Texture GetDefaultBackground() => currentSkin.GetDefaultBackground() ?? defaultSkin.GetDefaultBackground();
 
     public Sample GetUISample(UISamples.SampleType type) => currentSkin.GetUISample(type) ?? defaultSkin.GetUISample(type);
+    public Sample GetCourseSample(CourseScreen.SampleType type) => currentSkin.GetCourseSample(type) ?? defaultSkin.GetCourseSample(type);
 
     public Drawable GetStageBackground() => currentSkin.GetStageBackground() ?? defaultSkin.GetStageBackground();
     public Drawable GetStageBorder(bool right) => currentSkin.GetStageBorder(right) ?? defaultSkin.GetStageBorder(right);
@@ -271,8 +281,12 @@ public partial class SkinManager : Component, ISkin, IDragDropHandler
     public Drawable GetHitLine() => currentSkin.GetHitLine() ?? defaultSkin.GetHitLine();
     public AbstractJudgementText GetJudgement(Judgement judgement, bool isLate) => currentSkin.GetJudgement(judgement, isLate) ?? defaultSkin.GetJudgement(judgement, isLate);
 
+    public Drawable GetResultsScoreRank(ScoreRank rank) => currentSkin.GetResultsScoreRank(rank) ?? defaultSkin.GetResultsScoreRank(rank);
+
     public Sample GetHitSample() => currentSkin.GetHitSample() ?? defaultSkin.GetHitSample();
     public Sample[] GetMissSamples() => currentSkin.GetMissSamples() ?? defaultSkin.GetMissSamples();
     public Sample GetFailSample() => currentSkin.GetFailSample() ?? defaultSkin.GetFailSample();
     public Sample GetRestartSample() => currentSkin.GetRestartSample() ?? defaultSkin.GetRestartSample();
+    public Sample GetFullComboSample() => currentSkin.GetFullComboSample() ?? defaultSkin.GetFullComboSample();
+    public Sample GetAllFlawlessSample() => currentSkin.GetAllFlawlessSample() ?? defaultSkin.GetAllFlawlessSample();
 }

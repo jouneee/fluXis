@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
-using fluXis.Game.Map.Structures;
+using fluXis.Game.Map.Structures.Bases;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
@@ -68,7 +68,7 @@ public partial class EditorTagContainer : Container<EditorTag>
             Add(tag);
         }
 
-        Dictionary<int, int> tagsAtTime = new Dictionary<int, int>();
+        var tagsAtTime = new Dictionary<int, int>();
 
         foreach (var tag in Children)
         {

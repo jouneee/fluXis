@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using fluXis.Game.Graphics.Sprites;
-using fluXis.Game.Map.Events;
-using fluXis.Game.Map.Structures;
+using fluXis.Game.Graphics.UserInterface.Color;
+using fluXis.Game.Map.Structures.Bases;
+using fluXis.Game.Map.Structures.Events;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.List;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings;
 using fluXis.Game.Screens.Edit.Tabs.Shared.Points.Settings.Preset;
@@ -14,7 +15,7 @@ namespace fluXis.Game.Screens.Edit.Tabs.Design.Points.Entries;
 public partial class PlayfieldScaleEntry : PointListEntry
 {
     protected override string Text => "Playfield Scale";
-    protected override Colour4 Color => Colour4.FromHex("#D279C4");
+    protected override Colour4 Color => FluXisColors.PlayfieldScale;
 
     private PlayfieldScaleEvent scale => Object as PlayfieldScaleEvent;
 
@@ -23,7 +24,7 @@ public partial class PlayfieldScaleEntry : PointListEntry
     {
     }
 
-    protected override ITimedObject CreateClone() => new PlayfieldScaleEvent
+    public override ITimedObject CreateClone() => new PlayfieldScaleEvent
     {
         Time = Object.Time,
         ScaleX = scale.ScaleX,
@@ -78,7 +79,8 @@ public partial class PlayfieldScaleEntry : PointListEntry
 
                     Map.Update(scale);
                 }
-            }
+            },
+            new PointSettingsEasing<PlayfieldScaleEvent>(Map, scale)
         });
     }
 }

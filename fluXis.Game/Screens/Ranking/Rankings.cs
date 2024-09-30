@@ -4,6 +4,7 @@ using fluXis.Game.Graphics.UserInterface;
 using fluXis.Game.Graphics.UserInterface.Buttons;
 using fluXis.Game.Graphics.UserInterface.Color;
 using fluXis.Game.Input;
+using fluXis.Game.Localization;
 using fluXis.Game.Online.API.Requests.Leaderboards;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Screens.Ranking.UI;
@@ -28,7 +29,7 @@ public partial class Rankings : FluXisScreen, IKeyBindingHandler<FluXisGlobalKey
     public override bool AutoPlayNext => true;
 
     [Resolved]
-    private FluxelClient fluxel { get; set; }
+    private IAPIClient api { get; set; }
 
     private FillFlowContainer flow;
     private CornerButton backButton;
@@ -157,8 +158,8 @@ public partial class Rankings : FluXisScreen, IKeyBindingHandler<FluXisGlobalKey
                                 backButton = new CornerButton
                                 {
                                     Corner = Corner.BottomLeft,
-                                    ButtonText = "Back",
-                                    Icon = FontAwesome6.Solid.ChevronLeft,
+                                    ButtonText = LocalizationStrings.General.Back,
+                                    Icon = FontAwesome6.Solid.AngleLeft,
                                     Action = this.Exit
                                 }
                             }
@@ -198,7 +199,7 @@ public partial class Rankings : FluXisScreen, IKeyBindingHandler<FluXisGlobalKey
             });
         };
 
-        req.PerformAsync(fluxel);
+        api.PerformRequestAsync(req);
     }
 
     public override void OnEntering(ScreenTransitionEvent e)

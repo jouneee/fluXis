@@ -1,3 +1,4 @@
+using fluXis.Game.Map.Structures.Bases;
 using Newtonsoft.Json;
 using osu.Framework.Graphics;
 
@@ -9,7 +10,7 @@ public class HitSoundFade : ITimedObject
     /// The time at which the volume change should start.
     /// </summary>
     [JsonProperty("time")]
-    public float Time { get; set; }
+    public double Time { get; set; }
 
     /// <summary>
     /// The sound to change the volume of.

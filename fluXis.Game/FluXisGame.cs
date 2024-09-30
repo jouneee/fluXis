@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using fluXis.Game.Audio;
@@ -12,32 +13,35 @@ using fluXis.Game.Localization;
 using fluXis.Game.Localization.Stores;
 using fluXis.Game.Online.Fluxel;
 using fluXis.Game.Overlay.Achievements;
+using fluXis.Game.Overlay.Auth;
 using fluXis.Game.Overlay.Chat;
+using fluXis.Game.Overlay.Club;
 using fluXis.Game.Overlay.Exit;
 using fluXis.Game.Overlay.FPS;
-using fluXis.Game.Overlay.Login;
 using fluXis.Game.Overlay.Music;
 using fluXis.Game.Overlay.Network;
 using fluXis.Game.Overlay.Notifications;
 using fluXis.Game.Overlay.Notifications.Tasks;
 using fluXis.Game.Overlay.Notifications.Types.Image;
-using fluXis.Game.Overlay.Register;
 using fluXis.Game.Overlay.Settings;
 using fluXis.Game.Overlay.Toolbar;
 using fluXis.Game.Overlay.User;
 using fluXis.Game.Overlay.Volume;
 using fluXis.Game.Screens;
+using fluXis.Game.Screens.Intro;
 using fluXis.Game.Screens.Loading;
 using fluXis.Game.Screens.Menu;
+using fluXis.Game.Screens.Multiplayer;
 using fluXis.Game.Screens.Result;
 using fluXis.Game.Screens.Select;
-using fluXis.Game.Screens.Skin;
+using fluXis.Game.Screens.Skinning;
 using fluXis.Game.Utils;
+using fluXis.Game.Utils.Extensions;
+using fluXis.Game.Utils.Sentry;
 using fluXis.Shared.API.Packets.Other;
 using fluXis.Shared.API.Packets.User;
 using fluXis.Shared.Components.Users;
 using fluXis.Shared.Scoring;
-using fluXis.Shared.Utils;
 using JetBrains.Annotations;
 using osu.Framework.Allocation;
 using osu.Framework.Audio;
@@ -77,12 +81,23 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
 
     private LoadInfo loadInfo { get; } = new();
 
+    private SentryClient sentry { get; }
+
     private bool isExiting;
 
     private readonly BindableDouble inactiveVolume = new(1f);
 
+    public bool AnyOverlayOpen => overlayContainer.Any(x => x.State.Value == Visibility.Visible);
+    private Bindable<bool> allowOverlays { get; } = new(true);
+
     [UsedImplicitly]
     public bool Sex { get; private set; }
+
+    public FluXisGame()
+    {
+        // created here so that we can catch events before the game even starts
+        sentry = new SentryClient(this);
+    }
 
     [BackgroundDependencyLoader]
     private void load()
@@ -106,17 +121,19 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
 
         loadComponent(globalBackground = new GlobalBackground { InitialDim = 1 }, buffer.Add, true);
         loadComponent(screenContainer = new Container { RelativeSizeAxes = Axes.Both }, buffer.Add);
-        loadComponent(screenStack = new FluXisScreenStack(Activity), screenContainer.Add, true);
+        loadComponent(screenStack = new FluXisScreenStack(APIClient.Activity, allowOverlays), screenContainer.Add, true);
 
         loadComponent(overlayContainer = new Container<VisibilityContainer> { RelativeSizeAxes = Axes.Both }, buffer.Add);
         loadComponent(dashboard = new Dashboard(), overlayContainer.Add, true);
         loadComponent(new ChatOverlay(), overlayContainer.Add, true);
         loadComponent(userProfileOverlay = new UserProfileOverlay(), overlayContainer.Add, true);
+        loadComponent(new ClubOverlay(), overlayContainer.Add, true);
         loadComponent(new MusicPlayer(), overlayContainer.Add, true);
         loadComponent(new SettingsMenu(), overlayContainer.Add, true);
 
         loadComponent(new LoginOverlay(), buffer.Add, true);
         loadComponent(new RegisterOverlay(), buffer.Add, true);
+        loadComponent(new MultifactorOverlay(), buffer.Add, true);
         loadComponent(toolbar = new Toolbar(), buffer.Add, true);
 
         loadComponent(panelContainer = new PanelContainer { BlurContainer = buffer }, Add, true);
@@ -144,7 +161,7 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
         IsActive.BindValueChanged(active =>
         {
             var volume = Config.Get<double>(FluXisSetting.InactiveVolume);
-            this.TransformBindableTo(inactiveVolume, active.NewValue ? 1 : volume, 1000, Easing.OutQuint);
+            this.TransformBindableTo(inactiveVolume, active.NewValue ? 1 : volume, active.NewValue ? 500 : 4000, Easing.OutQuint);
         }, true);
     }
 
@@ -156,7 +173,6 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
 
         if (preload)
         {
-            AddInternal(component);
             action(component);
             return component;
         }
@@ -179,6 +195,9 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
         if (LoadQueue.Count == 0)
             return;
 
+        var sw = new Stopwatch();
+        sw.Start();
+
         var next = LoadQueue.First();
         LoadQueue.Remove(next.Key);
 
@@ -192,13 +211,17 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
         {
             action(c);
             loadInfo.FinishCurrent();
+
+            sw.Stop();
+            Logger.Log($"Finished loading {name} in {sw.ElapsedMilliseconds}ms.", LoggingTarget.Runtime, LogLevel.Debug);
+
             loadNext();
         });
     }
 
     public void WaitForReady(Action action)
     {
-        if (screenStack?.CurrentScreen is null or LoadingScreen)
+        if (screenStack?.CurrentScreen is null or LoadingScreen or IntroAnimation)
             Schedule(() => WaitForReady(action));
         else
             action();
@@ -209,11 +232,33 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
         base.LoadComplete();
         WaitForReady(() => PerformUpdateCheck(true));
 
+        var num = SDL2.SDL.SDL_NumJoysticks();
+        Logger.Log($"{num} sdl controllers");
+
+        for (int i = 0; i < num; i++)
+        {
+            int instanceID = SDL2.SDL.SDL_JoystickGetDeviceInstanceID(i);
+            var name = SDL2.SDL.SDL_JoystickNameForIndex(i);
+            Logger.Log($"sdl joystick [{instanceID}] {name}");
+        }
+
+        sentry.BindUser(APIClient.User);
+
         loadLocales();
+
+        toolbar.AllowOverlays.BindTo(allowOverlays);
+
+        allowOverlays.ValueChanged += e =>
+        {
+            Logger.Log($"Overlays {(e.NewValue ? "enabled" : "disabled")}", LoggingTarget.Runtime, LogLevel.Debug);
+
+            if (!e.NewValue)
+                CloseOverlays();
+        };
 
         ScheduleAfterChildren(() => screenStack.Push(new LoadingScreen(loadInfo)));
 
-        Fluxel.RegisterListener<AchievementPacket>(EventType.Achievement, res =>
+        APIClient.RegisterListener<AchievementPacket>(EventType.Achievement, res =>
         {
             var achievement = res.Data!.Achievement;
             Schedule(() =>
@@ -222,19 +267,19 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
             });
         });
 
-        Fluxel.RegisterListener<FriendOnlinePacket>(EventType.FriendOnline, res =>
+        APIClient.RegisterListener<FriendOnlinePacket>(EventType.FriendOnline, res =>
         {
             var user = res.Data!.User!;
             Schedule(() => NotificationManager.SendSmallText($"{user.PreferredName} is now online!", FontAwesome6.Solid.UserPlus));
         });
 
-        Fluxel.RegisterListener<FriendOnlinePacket>(EventType.FriendOffline, res =>
+        APIClient.RegisterListener<FriendOnlinePacket>(EventType.FriendOffline, res =>
         {
             var user = res.Data!.User!;
             Schedule(() => NotificationManager.SendSmallText($"{user.PreferredName} is now offline.", FontAwesome6.Solid.UserMinus));
         });
 
-        Fluxel.RegisterListener<ServerMessagePacket>(EventType.ServerMessage, res =>
+        APIClient.RegisterListener<ServerMessagePacket>(EventType.ServerMessage, res =>
         {
             var data = res.Data!.Message;
 
@@ -258,25 +303,6 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
                     break;
             }
         });
-
-        if (!Config.Get<bool>(FluXisSetting.NowPlaying)) return;
-
-        MapStore.MapSetBindable.BindValueChanged(_ =>
-        {
-            var song = MapStore.CurrentMapSet;
-            if (song == null) return;
-
-            var data = new
-            {
-                player = "fluXis",
-                title = song.Metadata.Title,
-                artist = song.Metadata.Artist,
-                cover = $"{Fluxel.Endpoint.AssetUrl}/cover/{song.OnlineID}",
-                background = $"{Fluxel.Endpoint.AssetUrl}/background/{song.OnlineID}",
-            };
-
-            File.WriteAllText($"{Host.Storage.GetFullPath("nowplaying.json")}", data.Serialize());
-        });
     }
 
     public override void SelectMapSet(RealmMapSet set)
@@ -285,8 +311,14 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
         globalBackground.AddBackgroundFromMap(set.Maps.First());
     }
 
-    public void OpenLink(string link)
+    public void OpenLink(string link, bool skipWarning = false)
     {
+        if (skipWarning)
+        {
+            Host.OpenUrlExternally(link);
+            return;
+        }
+
         if (panelContainer.Content != null)
         {
             Logger.Log("Blocking link open due to panel being open.", LoggingTarget.Runtime, LogLevel.Debug);
@@ -320,12 +352,12 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
 
     public override void CloseOverlays() => overlayContainer.Children.ForEach(c => c.Hide());
 
-    public override void PresentScore(RealmMap map, ScoreInfo score, APIUserShort player)
+    public override void PresentScore(RealmMap map, ScoreInfo score, APIUser player)
     {
         if (map == null || score == null)
             throw new ArgumentNullException();
 
-        screenStack.Push(new SoloResults(map, score, player));
+        screenStack.Push(new Results(map, score, player));
     }
 
     public void PresentUser(long id)
@@ -339,9 +371,28 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
         if (screenStack.CurrentScreen is not SelectScreen)
         {
             MenuScreen.MakeCurrent();
-            MenuScreen.Push(new SelectScreen());
+
+            if (MenuScreen.IsCurrentScreen())
+                MenuScreen.Push(new SelectScreen());
         }
     }
+
+    public void JoinMultiplayerRoom(long id, string password) => Scheduler.ScheduleIfNeeded(() => WaitForReady(() =>
+    {
+        Logger.Log($"joining multi room [{id}, {password}]");
+
+        MenuScreen.MakeCurrent();
+        MenuScreen.CanPlayAnimation();
+
+        if (MenuScreen.IsCurrentScreen())
+        {
+            MenuScreen.Push(new MultiplayerScreen
+            {
+                TargetLobby = id,
+                LobbyPassword = password
+            });
+        }
+    }));
 
     public bool OnPressed(KeyBindingPressEvent<FluXisGlobalKeybind> e)
     {
@@ -359,23 +410,20 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
                 return true;
         }
 
-        if (screenStack.AllowMusicControl)
+        switch (e.Action)
         {
-            switch (e.Action)
-            {
-                case FluXisGlobalKeybind.MusicPause:
-                    if (globalClock.IsRunning) globalClock.Stop();
-                    else globalClock.Start();
-                    return true;
+            case FluXisGlobalKeybind.MusicPause when screenStack.AllowMusicPausing:
+                if (globalClock.IsRunning) globalClock.Stop();
+                else globalClock.Start();
+                return true;
 
-                case FluXisGlobalKeybind.MusicPrevious:
-                    PreviousSong();
-                    return true;
+            case FluXisGlobalKeybind.MusicPrevious when screenStack.AllowMusicControl:
+                PreviousSong();
+                return true;
 
-                case FluXisGlobalKeybind.MusicNext:
-                    NextSong();
-                    return true;
-            }
+            case FluXisGlobalKeybind.MusicNext when screenStack.AllowMusicControl:
+                NextSong();
+                return true;
         }
 
         return false;
@@ -419,11 +467,14 @@ public partial class FluXisGame : FluXisGameBase, IKeyBindingHandler<FluXisGloba
         return !isExiting;
     }
 
-    public override void Exit()
+    public override void Exit(bool restart)
     {
-        toolbar.ShowToolbar.Value = false;
-        globalClock.FadeOut(1500);
-        exitAnimation.Show(buffer.Hide, base.Exit);
+        if (restart && !RestartOnClose())
+            return;
+
+        toolbar.Hide();
+        globalClock.VolumeOut(1500);
+        exitAnimation.Show(buffer.Hide, () => base.Exit(false));
         isExiting = true;
     }
 
