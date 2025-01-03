@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using fluXis.Game.Utils;
 using fluXis.Import.osu.Map.Components;
 using fluXis.Import.osu.Map.Enums;
+using fluXis.Utils;
 using osu.Framework.Graphics.Primitives;
 
 namespace fluXis.Import.osu.Map;
@@ -139,6 +139,10 @@ public class OsuParser
 
             switch (key)
             {
+                case "HPDrainRate":
+                    map.HealthDrainRate = float.Parse(value, CultureInfo.InvariantCulture);
+                    break;
+
                 case "CircleSize":
                     map.CircleSize = float.Parse(value, CultureInfo.InvariantCulture);
                     break;

@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using fluXis.Import.osu.Map.Components;
-using fluXis.Game.Map;
-using fluXis.Game.Map.Structures;
 using fluXis.Import.osu.AutoImport;
+using fluXis.Map;
+using fluXis.Map.Structures;
 using JetBrains.Annotations;
 
 namespace fluXis.Import.osu.Map;
@@ -27,6 +27,7 @@ public class OsuMap
     public string Tags { get; set; }
 
     // [Difficulty]
+    public float HealthDrainRate { get; set; }
     public float CircleSize { get; set; }
     public float OverallDifficulty { get; set; }
 
@@ -64,7 +65,7 @@ public class OsuMap
         if (Mode != 3)
             return null;
 
-        var mapInfo = new OsuMapInfo()
+        var mapInfo = new OsuMapInfo
         {
             Metadata = new MapMetadata
             {
@@ -82,7 +83,8 @@ public class OsuMap
             TimingPoints = new List<TimingPoint>(),
             ScrollVelocities = new List<ScrollVelocity>(),
             InitialKeyCount = (int)CircleSize,
-            AccuracyDifficulty = OverallDifficulty
+            AccuracyDifficulty = OverallDifficulty,
+            HealthDifficulty = HealthDrainRate
         };
 
         foreach (var timingPoint in TimingPoints)

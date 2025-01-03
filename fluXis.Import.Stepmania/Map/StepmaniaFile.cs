@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using fluXis.Game.Map;
-using fluXis.Game.Map.Structures;
 using fluXis.Import.Stepmania.Map.Components;
+using fluXis.Map;
+using fluXis.Map.Structures;
 
 namespace fluXis.Import.Stepmania.Map;
 
@@ -230,7 +230,7 @@ public class StepmaniaFile
                                 break;
 
                             case StepNote.Roll:
-                                map.HitObjects.Add(new StepRollNote()
+                                map.HitObjects.Add(new StepRollNote
                                 {
                                     Time = (int)Math.Round(time, MidpointRounding.AwayFromZero),
                                     Lane = i + 1
